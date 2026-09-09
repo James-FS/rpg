@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 910c561fc822adc4e8b130842259fe4a, type: 3}
+  m_Name: MainQuest_001
+  m_EditorClassIdentifier: 
+  questId: main_001
+  title: "\u5BFB\u627E\u6708\u5149\u836F\u8349"
+  description: "\u836F\u5E08\u6797\u6D1B\u7684\u5973\u513F\u75C5\u91CD\uFF0C\u9700\u8981\u68EE\u6797\u6DF1\u5904\u7684\u6708\u5149\u836F\u8349\u3002"
+  isMainQuest: 1
+  targetItemId: moon_herb
+  targetCount: 1
+  rewardGold: 50
+  rewardItemId: healing_potion
+  rewardItemCount: 1

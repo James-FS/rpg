@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6382704dc201bf04c8378d6c4bb54fc8, type: 3}
+  m_Name: WoodSword
+  m_EditorClassIdentifier: 
+  itemId: wood_sword
+  displayName: "\u6728\u5251"
+  description: "\u4E00\u628A\u666E\u901A\u7684\u6728\u5251\uFF0C\u804A\u80DC\u4E8E\u65E0\u3002"
+  itemType: 0
+  attack: 3
+  defense: 0
+  healAmount: 0
+  isQuestItem: 0

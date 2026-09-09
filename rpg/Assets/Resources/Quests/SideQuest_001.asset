@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 910c561fc822adc4e8b130842259fe4a, type: 3}
+  m_Name: SideQuest_001
+  m_EditorClassIdentifier: 
+  questId: side_001
+  title: "\u6536\u96C6\u94C1\u77FF"
+  description: "\u94C1\u5320\u963F\u62D3\u9700\u8981 3 \u5757\u94C1\u77FF\u6765\u953B\u9020\u88C5\u5907\u3002"
+  isMainQuest: 0
+  targetItemId: iron_ore
+  targetCount: 3
+  rewardGold: 30
+  rewardItemId: iron_sword
+  rewardItemCount: 1

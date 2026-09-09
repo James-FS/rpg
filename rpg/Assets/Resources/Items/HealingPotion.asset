@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6382704dc201bf04c8378d6c4bb54fc8, type: 3}
+  m_Name: HealingPotion
+  m_EditorClassIdentifier: 
+  itemId: healing_potion
+  displayName: "\u6CBB\u7597\u836F\u6C34"
+  description: "\u6062\u590D 30 \u70B9\u751F\u547D\u503C\u7684\u836F\u6C34\u3002"
+  itemType: 2
+  attack: 0
+  defense: 0
+  healAmount: 30
+  isQuestItem: 0

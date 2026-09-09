@@ -1,0 +1,34 @@
+# ---- Unity 生成目录 / 缓存 ----
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+[Ll]og/
+crashlytics-build.properties
+
+# ---- IDE 及 Unity 自动生成的工程文件 ----
+*.csproj
+*.sln
+*.userprefs
+*.unityproj
+*.pidb
+*.booproj
+*.svd
+.vs/
+.idea/
+
+# ---- Codely 本地缓存（非工程内容）----
+rpg/.codely-cli/
+rpg/.codely.packages/
+
+# ---- 备份 / 杂项 ----
+*.bak
+*.tmp
+*.orig
+.DS_Store
+Thumbs.db
+Desktop.ini
