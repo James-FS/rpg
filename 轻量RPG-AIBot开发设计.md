@@ -3,6 +3,10 @@
 > 目标：使用团结引擎做一个最小可玩 RPG，优先验证 AIBot NPC 对话、发任务、发奖励和记忆。
 >
 > 目标时长：第一版 20～30 分钟；后续可扩展到 1 小时。
+>
+> **剧情定稿（2026-09）**：以 `雾港矿镇-完整剧本.md` **v2.0-slice《回声与承诺》** 为准  
+> （两段主线：采药 + 矿灯；NPC：林洛 + 阿拓=老王；单结局；40～60 分钟）。  
+> 原 2～4 小时《黑曜回声》全量内容降为该文 §14 资料片存档，不进当前开发范围。
 
 ---
 
@@ -24,6 +28,14 @@
 - 存档：单槽位 JSON。
 - AIBot：流式对话、任务查询、接受任务、完成任务、发放奖励。
 
+### 第二波体验完善（MVP 跑通后追加，详见 §17）
+
+- 战斗反馈：受击顿帧、伤害飘字、死亡消散。
+- 任务目标指引：HUD 当前目标 + 简易方向提示。
+- 玩家死亡体验：死亡演出、回镇重生、轻量金币惩罚。
+- NPC 互通玩家事迹：一个 NPC 能提及玩家对另一个 NPC 做过的事。
+- 撒谎/违约可被戳穿：空手交任务、食言等可被 NPC 记住并吐槽。
+
 ### 第一版不做
 
 - 多职业、技能树、复杂属性。
@@ -31,6 +43,7 @@
 - 多人联机。
 - 模型直接修改任务、背包或装备。
 - 复杂战斗 AI。
+- 多小地图 / 寻路网格（指引先用文字 + 门点方向即可）。
 
 ---
 
@@ -64,14 +77,28 @@
 
 ## 3. 剧情最小设定
 
+> 详细人物关系、两段主线与结局卡见 `雾港矿镇-完整剧本.md` v2.0-slice。
+
 玩家来到雾港小镇，药师林洛的女儿生病，需要森林中的月光药草。林洛请求玩家帮忙，玩家完成任务后获得报酬。
 
-林洛只保留三个记忆点：
+第二幕（剧本 v2.0-slice）：为铁匠阿拓（王拓）找回蓝色矿灯，在浅道听见会复述人话的回声，交还时以「实话 / 谎话」收尾。
+
+林洛记忆点（MVP 三个 + §17 体验完善扩展）：
 
 ```text
+# MVP（已验证）
 player_accepted_quest
 player_was_polite
 player_returned_with_herb
+
+# §17 撒谎/违约戳穿（游戏侧写 flag，模型只读）
+player_tried_turnin_without_herb   # 空手来交任务
+player_broke_promise               # 答应后长时间未交 / 明确食言
+player_was_rude                    # record_player_choice(rude)
+
+# §17 跨 NPC 事迹（世界旗标，任意 NPC 快照可读）
+world_helped_lin_find_herb         # 帮林洛完成采药
+world_helped_lin_before            # 是否已对林洛有恩
 ```
 
 灰狼第一版只作为敌人。后续再增加“交易/帮助灰狼”的分支，不影响基础系统。
@@ -132,6 +159,9 @@ Packages/com.aibot.npcagent
 | `Scripts/Quest/RewardService.cs` ★ | 系统层（钱包/交易原语） | 金币 + OnGoldChanged + GrantQuestReward；QuestSystem 只留状态机 |
 | `Scripts/Bootstrap/`（GameBootstrapper） | AppRoot 组装 | 按依赖顺序挂系统（§6.1 六步模板第②步） |
 | `Scripts/Dialogue/GameContextProvider.cs` | 系统层只读投影 | 给 AI 的快照，非独立系统 |
+| `Scripts/World/WorldFlagSystem.cs` ★§17 | 系统层（跨 NPC 旗标） | 帮助/违约等世界 flag + 存档 |
+| `Scripts/Combat/CombatFeedback.cs` ★§17 | View 层 | 顿帧/飘字/消散，只订阅事件 |
+| `Scripts/UI/QuestTrackerView.cs` ★§17 | View 层 | 目标行 + 门点提示 |
 | `Resources/Items|Quests/` + ItemData / QuestData | 数据层 | 内容资产，加内容只动这里 |
 | `Scripts/LuaLab/` + `StreamingAssets/LuaLab/` | §16 学习沙盒 | 独立实验区，不属于 §6.1 分层，不进 Build Settings 主流程 |
 
@@ -199,17 +229,20 @@ Forest
 
 | 系统 | 只负责什么 |
 |---|---|
-| `PlayerController` | 移动、攻击、受击 |
+| `PlayerController` | 移动、攻击、受击、死亡/重生入口 |
 | `PlayerInteractor` | 检测附近 NPC、物品和入口 |
 | `NpcInteractable` | 打开/关闭 NPC 对话 |
 | `NpcAgent` | AIBot 对话、流式输出、工具请求 |
 | `DialogueBridge` | 把 AIBot 事件显示到 UI |
-| `QuestSystem` | 任务状态和目标推进 |
+| `QuestSystem` | 任务状态和目标推进、当前追踪任务 |
 | `InventorySystem` | 物品增删和查询 |
 | `EquipmentSystem` | 装备穿戴和属性更新 |
-| `RewardService` | 固定奖励发放 |
+| `RewardService` | 固定奖励发放、交易/扣款原语 |
 | `SaveSystem` | JSON 保存和读取 |
-| `GameContextProvider` | 提供给 AIBot 的只读状态 |
+| `GameContextProvider` | 提供给 AIBot 的只读状态（含世界旗标/戳穿 flag） |
+| `WorldFlagSystem` ★§17 | 跨 NPC 事迹旗标（帮助/违约/无礼）+ 存档 |
+| `CombatFeedback` ★§17 | 纯表现：顿帧、飘字、受击闪白、死亡消散 |
+| `QuestTrackerView` ★§17 | HUD 当前目标文案 + 门点/目标方向提示 |
 
 核心原则：
 
@@ -257,10 +290,12 @@ AIBot 负责“怎么说”
 ├─────────────────────────────────────────────────────┤
 │  系统层（数据 + 规则，各自领域管家）                     │
 │    QuestSystem / InventorySystem / EquipmentSystem    │
-│    RewardService(钱包) ★待抽 / SaveSystem / 拾取·战斗   │
+│    RewardService(钱包) / SaveSystem / 拾取·战斗        │
+│    WorldFlagSystem(跨NPC旗标) ★§17                   │
 ├─────────────────────────────────────────────────────┤
 │  数据层（纯数据资产 + 存档读写）                        │
-│    ItemData / QuestData / NpcProfile ★待建 / 存档 JSON │
+│    ItemData / QuestData / NpcProfile / 存档 JSON     │
+│    （worldFlags / playerFlags 进存档）★§17           │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -268,7 +303,7 @@ AIBot 负责“怎么说”
 
 | 抽屉 | 装什么 | 现在要做的 |
 |---|---|---|
-| UI 抽屉 | 4 个面板 | 删直调系统的代码，改为发意图 |
+| UI 抽屉 | 4 个面板 + QuestTrackerView/CombatFeedback/DeathFade（§17） | 删直调系统的代码，改为发意图 |
 | 系统抽屉 | AppRoot 上各系统 | 各自管各自领域，跨域变更交给 Session 编排 |
 | GameSession | 跨系统流程 | 新增；全项目流程代码只放这里 |
 
@@ -617,6 +652,7 @@ save.tmp → 校验 JSON → 替换 save.json
 
 > 状态更新于 2026-08-30（第一轮完成 T0~T2 + UI 第一阶段；第二轮完成 T3 对话、T4 任务工具）
 > 2026-09-05：T4 拾取推进补齐、T5 记忆全部通过；§6.1 架构/好感度/装备战斗/掉落等已完成（见 §6.1 与 §15）
+> 2026-09 追加：**T6 体验完善**五件套已写入方案 §17（战斗反馈/目标指引/死亡体验/NPC互通/撒谎戳穿），待实现
 
 ### T0：工程验证
 
@@ -665,6 +701,17 @@ save.tmp → 校验 JSON → 替换 save.json
       `memories/{npc}/{player}.json` 生成摘要+facts，新会话正确注入，实测：新会话问"还记得我吗"→
       "你是小勇，你答应过帮我找月光药草"）。
 - [x] 重复 requestId 不重复发奖励（Server 挂起轮守卫 + 系统层状态机幂等）。
+
+### T6：体验完善（§17 设计，待实现）
+
+> 目标：在不改架构铁律的前提下，让「打起来有反馈、走起来有方向、死了有代价、NPC 活起来」。
+> 落地顺序建议：T6.1 → T6.2 → T6.3 → T6.5 → T6.4（戳穿可先只接林洛；互通要等第二个 NPC 才完整见效）。
+
+- [ ] T6.1 战斗反馈：受击顿帧、伤害飘字、受击闪白强化、灰狼死亡消散；打中/击杀可听音（可选静音开关）。
+- [ ] T6.2 任务目标指引：HUD 显示当前追踪任务目标文案；QuestPanel 高亮追踪中任务；按场景门点做简易方向提示（Town→Forest / Forest→Town）。
+- [ ] T6.3 玩家死亡体验：死亡淡出演出 + 文案；回 Town 重生并满血；扣除当前金币 10%（下限 0）；死亡后自动存档；重生点用 Town 的 PlayerSpawn。
+- [ ] T6.4 撒谎/违约戳穿：空手交任务写 `player_tried_turnin_without_herb`；食言写 `player_broke_promise`；rude 走已有 `record_player_choice`；上述 flag 进 GameContextProvider 快照，林洛人设引导「记得/吐槽」。
+- [ ] T6.5 NPC 互通玩家事迹：`WorldFlagSystem`（帮助林洛采药等）+ 存档；快照注入 `worldFlags`；第二 NPC（阿拓）接入后验证「林洛提过你」。
 
 ---
 
@@ -880,6 +927,7 @@ Assets/
 ### 下一轮待做（已退役 → 统一由 §6.1「现状差距清单」管理）
 
 > 2026-09-05 更新：下表旧项 C/D/E/F 均已验收或闭环，仅 G（UI2 美术）仍是独立待办。
+> 体验完善五件套（战斗反馈/目标指引/死亡/互通/戳穿）见 **§17、T6**，不在本退役表内。
 
 | 旧清单项 | 现状与归宿 |
 |---|---|
@@ -890,6 +938,7 @@ Assets/
 | E record_player_choice 工具 | ✅ 已落地（好感度白名单工具，两端 enabledToolIds 放行） |
 | F UI 已知问题修复（反射/重建） | ✅ 反射已修；列表重建留 UI2（见已知问题 2） |
 | G UI 2 正式美术素材 | 仍待办（美术替换，与架构无关） |
+| H 体验完善五件套 | → **§17 + §12 T6**（战斗反馈 / 目标指引 / 死亡体验 / NPC 互通 / 撒谎戳穿） |
 
 ---
 
@@ -979,3 +1028,251 @@ Assets/Scenes/LuaLab.unity        独立练习场景，不进 Build Settings 主
 
 > 注：`XLua.Hotfix`（运行时给现有 C# 方法打补丁）需要构建期注入，与"Lua 驱动 + 重载脚本"
 > 是两套机制，**不进本沙盒核心练习**，以后当进阶专题单独玩。
+
+---
+
+## 17. 体验完善设计（2026-09 追加）
+
+> 前提：MVP 主链路（T0～T5）已跑通；本章只补「玩起来」和「NPC 活起来」，
+> **不改 §6.1 铁律**：表现层纯展示，flag 由游戏代码写，模型只读快照、不能直接改 flag。
+>
+> 对应任务清单：§12 T6。
+
+### 17.1 战斗反馈
+
+**目标**：攻击命中立刻有「打中了」的感觉；死亡不再只是物体消失。
+
+| 反馈 | 规格 | 观察源 |
+|---|---|---|
+| 受击顿帧 hitstop | 命中时 `Time.timeScale=0.03~0.05`，持续 0.05s，再恢复 | 玩家攻击命中 / 灰狼咬中玩家 |
+| 伤害飘字 | 世界坐标弹出数字，上飘 0.6s 淡出；暴击/装备加成可同色区分 | `OnEnemyDamaged(dmg, worldPos)` / 玩家受击 |
+| 受击闪白 | 已有灰狼闪色，保留并保证 1 次攻击只闪 1 次 | EnemyWolf |
+| 死亡消散 | 缩放/下沉 + 半透明渐隐 0.4s 后回收对象池；禁止瞬间 SetActive(false) | EnemyWolf.OnDeath |
+| 击杀提示（可选） | HUD toast「灰狼被击败」；可关 | OnEnemyDied |
+
+**事件契约（View 只订阅，不反向改数据）**：
+
+```text
+OnEnemyDamaged(int amount, Vector3 worldPos)   EnemyWolf / 战斗命中处 → CombatFeedback
+OnEnemyDied(EnemyWolf wolf)                    EnemyWolf → CombatFeedback / WolfSpawner
+OnPlayerDamaged(int effectiveDamage)           PlayerController → CombatFeedback（飘字可选）
+```
+
+**架构落点**：
+
+- 新脚本 `Scripts/Combat/CombatFeedback.cs`：纯 View（对象池飘字 + 顿帧 + 死亡消散协程），挂场景或 AppRoot 均可，**不进 GameSession**。
+- `EnemyWolf.TakeDamage` / 死亡路径只负责「发事件 + 触发表现协程入口」，掉落仍走现有 `GameSession.PickupItem`。
+- 数值（顿帧时长、飘字存活）全部 SerializeField，不写死魔法数。
+
+**验收**：
+
+1. 木剑打灰狼：有顿帧 + 飘「8」左右数字 + 闪白。
+2. 灰狼死亡：渐隐后再从 Spawner 复用，不闪一下就没。
+3. 玩家挨咬：血条下降同时可选飘字，不打断移动输入超过顿帧时长。
+
+### 17.2 任务目标指引
+
+**目标**：玩家接任务后知道「现在该去哪」，森林里不迷路。
+
+**第一版只做两层，不做小地图**：
+
+| 层 | 内容 | 说明 |
+|---|---|---|
+| L1 文案 | HUD 固定一行「当前目标：…」 | 来自追踪任务的目标描述 / 进度 |
+| L2 门点方向 | 需要换场景时，屏幕边缘或门点上方显示简易指示（箭头/光柱/文字「森林入口 →」） | 只对 `SceneGate` 生效，不做逐物品寻路 |
+
+**数据扩展（QuestData，加内容不动代码逻辑）**：
+
+```text
+objectiveHint        例："在森林深处寻找月光药草（0/1）"
+targetScene          例：Forest / Town / 空=当前场景
+hintGateId           例：ForestGate（可选，驱动 L2）
+```
+
+**系统职责**：
+
+```text
+QuestSystem
+  + TrackedQuestId（默认主线；Accept 时设为该任务）
+  + GetTrackedObjectiveText() → 「标题 + hint + 进度」
+
+QuestTrackerView（UI 抽屉，订阅 OnQuestStateChanged / OnInventoryChanged）
+  刷新 HUD 目标行；目标场景 ≠ 当前场景时显示门点提示
+
+SceneGate
+  已是 IInteractable；L2 可选：Gate 方向指示由 TrackerView 按目标场景找对应 Gate
+```
+
+**验收**：
+
+1. 接主线后 HUD 出现「寻找月光药草」。
+2. 站在 Town 未进森林时，有「前往森林」类提示。
+3. 拾取药草后目标文案变为「回去找林洛」（或 hint 更新）。
+4. 任务 Rewarded 后目标行隐藏或显示「无追踪任务」。
+
+### 17.3 玩家死亡体验
+
+**现状**（`PlayerController.RespawnRoutine`）：toast → 1.5s → LoadScene(Town)，无惩罚、无演出、重生点未显式绑定。
+
+**目标态**：
+
+```text
+HP ≤ 0
+  → 禁止输入 + 死亡淡出（黑屏 0.4~0.6s）+ 文案「你在雾里倒下了…」
+  → GameSession.RespawnPlayer()：
+       扣金币 = max(0, floor(gold * 0.10))     ← RewardService 原语，规则在系统层
+       加载 Town
+       绑定 PlayerSpawn 满血恢复
+       Save
+  → HUD toast「你在镇口醒来，遗失了 N 金币」
+```
+
+**架构落点**：
+
+| 项 | 归属 | 约束 |
+|---|---|---|
+| 死亡判定 | PlayerController | `currentHp<=0` 时只发 `OnPlayerDied`，不直接 LoadScene（改掉现在直接开协程切场景） |
+| 编排 | GameSession.RespawnPlayer | 调 RewardService 扣金 → 加载场景 → SetHp(max) → Save |
+| 扣金规则 | RewardService.DenyGold(percent) 或 TrySpend | Session 不写 `if` 业务分支以外的数值拼装；比例常量可配置 |
+| 演出 | UI（淡出遮罩）+ CombatFeedback 或 DeathFadeView | 纯表现 |
+
+**刻意不做**：尸体掉落装备、永久死亡、复杂跑尸。轻惩罚即可，避免打断 20～30 分钟节奏。
+
+**验收**：
+
+1. 被狼咬死 → 黑屏文案 → 回 Town 满血。
+2. 死前金币 100 → 死后 90；金币 5 → 死后 0（不出现负数）。
+3. 死亡扣金后存档，重启读档金币一致。
+4. 死亡不会丢任务/背包/装备。
+
+### 17.4 NPC 之间会互相提玩家
+
+**目标**：玩家帮过 A，再和 B 聊时 B 会提到；记忆从「单机 NPC」变成「镇子里的事」。
+
+**机制：世界旗标 WorldFlagSystem（游戏侧权威）**
+
+```text
+世界旗标（跨 NPC 共享，进存档 worldFlags）
+  world_helped_lin_find_herb     主线领奖成功时写入
+  world_helped_lin_before        帮助类旗标合并视图（可派生）
+  （预留）world_helped_tuo_smith / world_angered_wolf_pack ...
+
+规则：
+  · 只有 GameSession 在确定性流程成功点写入（领奖、关键选择）
+  · 模型 / 工具不能直接写 worldFlags；record_player_choice 只写 Relationship 白名单
+  · GameContextProvider 快照注入：
+      "worldFlags": ["world_helped_lin_find_herb"]
+      "otherNpcNotes": "林洛记得你帮她采过药。"   ← 由数据模板生成，不是 LLM 编
+```
+
+**呈现方式（两档，先做档 A）**：
+
+| 档 | 做法 | 成本 |
+|---|---|---|
+| A 快照引导（推荐先做） | 阿拓的 snapshot 含 worldFlags + 简短中文 note；其 persona/系统提示写「若 note 非空，可在自然对话中提及，勿生硬点名」 | 几乎零新对话 UI |
+| B 工具（可选） | 注册只读工具 `get_town_rumors`，NPC 主动「打听」 | 依赖 Server 工具白名单 |
+
+**第二 NPC 接入时必配**：
+
+```text
+NpcProfile / 连接配置：
+  npcId=blacksmith_tuo
+  可读 worldFlags 白名单（只读，不写）
+  mentionPolicy：有 world_helped_lin_find_herb → 允许提及林洛
+```
+
+**验收**：
+
+1. 先完成林洛主线领奖 → worldFlags 出现在存档 JSON。
+2. 与阿拓对话，不主动提林洛时，阿拓有机会说出「听说你帮林药师找了药草」类语句。
+3. 新开角色（无旗标）时，阿拓不会无中生有提「帮过林洛」。
+4. 旗标只在领奖成功后出现；失败/未完成不出现。
+
+### 17.5 撒谎 / 违约可被戳穿
+
+**目标**：玩家「空手交差」「答应了却摆烂」「态度恶劣」会被记住，对话里有代价感——仍是轻量，不做复杂道德系统。
+
+**游戏侧写 flag（模型只读）**：
+
+| Flag | 写入时机 | 写入点 |
+|---|---|---|
+| `player_tried_turnin_without_herb` | `complete_quest` 校验失败且原因是「已 Accepted 但缺目标物品」 | QuestToolHost 失败分支 → 经 Session 记录 → WorldFlag/Relationship |
+| `player_broke_promise` | ① 玩家明确选择「我做不了/反悔」（record_player_choice 白名单 `break_promise`）② 可选：Accepted 后现实时间超过阈值仍无进展再对话（阈值可配置，默认关） | RelationshipSystem + WorldFlag |
+| `player_was_rude` | 已有 `record_player_choice(rude)` | RelationshipSystem（已存在） |
+
+**快照字段（GameContextProvider 扩展）**：
+
+```json
+{
+  "questState": "Accepted",
+  "hasQuestTarget": false,
+  "playerFlags": [
+    "player_tried_turnin_without_herb",
+    "player_was_rude"
+  ],
+  "linFavor": 2
+}
+```
+
+**林洛人设引导（Server persona / 系统提示，不写死台词树）**：
+
+```text
+若 playerFlags 含 player_tried_turnin_without_herb：
+  可温和指出「你空手回来过」，但不要辱骂；仍以任务推进为主。
+若 player_broke_promise 或 favor 很低：
+  语气变谨慎，可拒绝额外支线闲聊；不阻断主任务完成（游戏校验通过即可交）。
+若 player_was_polite：
+  可保持现在的温和语气。
+```
+
+**硬约束**：
+
+```text
+· 模型不能凭对话「自己判定」玩家撒谎并改任务；必须游戏已写入 flag。
+· 戳穿只影响语气与可选支线态度，不直接改金币/物品/任务状态。
+· 连续 fail 的 complete_quest 不重复堆叠同一 flag（幂等 Set，不是 List++）。
+```
+
+**验收**：
+
+1. 接任务后空手对话要求交差 → 工具失败 → flag 写入 → 林洛后续可提「药草呢？」。
+2. 选择 rude → favor 下降，语气变差，但不导致任务无法完成。
+3. 真正交上药草领奖后，可另写 `player_returned_with_herb`，戳穿类对话应减弱（persona 引导）。
+4. 存档重启后 flags 仍在，跨 Session 记忆与 flag 一致。
+
+### 17.6 架构与数据落点汇总
+
+```text
+新增
+  Scripts/Combat/CombatFeedback.cs      View：顿帧/飘字/消散
+  Scripts/UI/QuestTrackerView.cs        View：目标行 + 门点提示
+  Scripts/World/WorldFlagSystem.cs      系统：跨 NPC 旗标 + 存档
+  （可选）Scripts/UI/DeathFadeView.cs   View：死亡淡出
+
+修改（只加不拆层）
+  EnemyWolf / PlayerController          补战斗/死亡事件
+  GameSession                           RespawnPlayer；领奖成功写 world flag
+  QuestToolHost                         complete_quest 失败原因区分并记 flag
+  GameContextProvider                   worldFlags / playerFlags / 提示 note
+  QuestData                             objectiveHint / targetScene / hintGateId
+  QuestSystem                           TrackedQuestId + 目标文案查询
+  RewardService                         扣金原语（死亡惩罚用）
+  SaveSystem                            新增 worldFlags、playerFlags 字段（version+1 兼容）
+
+不改
+  AIBot 插件内部逻辑
+  §6.1 三层抽屉与铁律
+  模型不可直改任务/背包/装备/flag
+```
+
+### 17.7 落地顺序与依赖
+
+```text
+T6.1 战斗反馈          无依赖，纯表现，最先做
+T6.2 目标指引          依赖 QuestData 字段扩展
+T6.3 死亡体验          依赖 RewardService 扣金 + Session 编排
+T6.5 世界旗标          可先做旗标与存档；完整「互提」等阿拓
+T6.4 撒谎/违约戳穿     依赖旗标/Relationship + QuestToolHost 失败分支
+```
+
+一次只做一小项，每项按 §13 通用提示词约束执行，做完手动验收再进入下一项。

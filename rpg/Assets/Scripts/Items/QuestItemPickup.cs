@@ -21,10 +21,12 @@ namespace FogHarbor.Items
         [SerializeField] private bool destroyOnPickup = true;
 
         private GameSession gameSession;
+        private PlayerController player;
 
         private void Awake()
         {
             gameSession = FindObjectOfType<GameSession>();
+            player = FindObjectOfType<PlayerController>();
         }
 
         public string GetPrompt()
@@ -65,6 +67,12 @@ namespace FogHarbor.Items
                 UIManager.Instance.ShowToast($"获得 {name} x{count}");
             else
                 Debug.Log($"[QuestItemPickup] 获得 {name} x{count}");
+
+            // 表现层：转身面向拾取物并播放采集动作（短暂定身）
+            if (player == null)
+                player = FindObjectOfType<PlayerController>();
+            if (player != null)
+                player.PlayGather(transform.position);
 
             if (destroyOnPickup)
                 Destroy(gameObject);

@@ -1,7 +1,10 @@
 {
   "dependencies": {
+    "cn.tuanjie.ai.generators": "file:../.codely-cli/extensions/TJGenerators/Packages/cn.tuanjie.ai.generators",
+    "com.aibot.npcagent": "file:D:/Code/aibot/Packages/com.aibot.npcagent",
     "com.unity.collab-proxy": "2.12.4",
     "com.unity.feature.development": "1.0.1",
+    "com.unity.render-pipelines.universal": "14.2.0-t1",
     "com.unity.textmeshpro": "3.0.9",
     "com.unity.timeline": "1.7.7",
     "com.unity.ugui": "1.0.0",
@@ -37,8 +40,6 @@
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0",
-    "com.aibot.npcagent": "file:D:/Code/aibot/Packages/com.aibot.npcagent",
-    "cn.tuanjie.ai.generators": "file:../.codely-cli/extensions/TJGenerators/Packages/cn.tuanjie.ai.generators",
-    "cn.tuanjie.codely.bridge": "file:../.codely.packages/cn.tuanjie.codely.bridge@1.0.81-exp.1"
+    "cn.tuanjie.codely.bridge": "1.0.81"
   }
 }
