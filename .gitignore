@@ -36,3 +36,8 @@ Desktop.ini
 # ---- 本地临时备份 / 资源重组快照（不纳入版本控制）----
 _rpg_assets_before_reorg_*/
 _rpg_removed_assets_*/
+
+# ---- 仅保留本地的策划/设计文档（方案、剧本、设计）----
+/混元模型-Blender处理流程.md
+/轻量RPG-AIBot开发设计.md
+/雾港矿镇-完整剧本.md
