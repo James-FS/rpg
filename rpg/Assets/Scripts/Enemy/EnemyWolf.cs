@@ -42,6 +42,14 @@ namespace FogHarbor.Enemy
 
         [Header("攻击")]
         [SerializeField] private float attackCooldown = 1.5f;
+        [Tooltip("咬中判定延迟（秒）：从攻击动作开始到伤害结算，对齐 Attack clip 的咬合帧（实测 1.2s clip 的最大前伸在 0.36s 处）")]
+        [SerializeField] private float attackHitDelay = 0.36f;
+
+        [Header("受击击退")]
+        [Tooltip("每被击中一次沿受击方向后退的距离（米）")]
+        [SerializeField] private float knockbackDistance = 1.4f;
+        [Tooltip("击退持续时间（秒）：期间由击退接管移动，AI 不移动")]
+        [SerializeField] private float knockbackDuration = 0.25f;
 
         [Header("碰撞体（需匹配模型缩放：模型×1.7 时 0.98→1.66 高）")]
         [SerializeField] private float ccRadius = 0.5f;
@@ -61,6 +69,12 @@ namespace FogHarbor.Enemy
         private Color originalColor;
         private Coroutine flashRoutine;
         private Coroutine deathRoutine;
+        private Coroutine attackRoutine;
+
+        // 击退状态：>0 时由击退接管移动（AI 行为暂停），速度按剩余时间线性衰减
+        private float knockbackTimeLeft;
+        private Vector3 knockbackDir;
+        private float knockbackSpeed;
 
         public int CurrentHp => currentHp;
         public int MaxHp => maxHp;
@@ -68,7 +82,10 @@ namespace FogHarbor.Enemy
         /// <summary>当前状态（供 WolfAnimatorDriver 驱动动画，不改动内部状态机）。</summary>
         public WolfState CurrentState => state;
 
-        /// <summary>每次实际咬中玩家时触发（供动画层重播 Attack clip，伤害与动画同步）。</summary>
+        /// <summary>每次开始攻击动作时触发（供动画层从头播放 Attack clip；伤害在咬合帧才结算）。</summary>
+        public event System.Action OnAttackStarted;
+
+        /// <summary>咬中判定生效（动画咬合帧）时触发，此刻才真实结算伤害。</summary>
         public event System.Action OnAttackLanded;
 
         private void Awake()
@@ -104,12 +121,51 @@ namespace FogHarbor.Enemy
             if (controller == null) return;
             ApplyGravity();
 
+            // 被击退期间：由击退接管移动，AI 行为（巡逻/追击/攻击）暂停
+            if (knockbackTimeLeft > 0f)
+            {
+                UpdateKnockback();
+                return;
+            }
+
             switch (state)
             {
                 case WolfState.Patrol: UpdatePatrol(); break;
                 case WolfState.Chase: UpdateChase(); break;
                 case WolfState.Attack: UpdateAttack(); break;
             }
+        }
+
+        // ─── 击退 ───
+
+        /// <summary>沿"从攻击者指向自己"的方向被推开；总位移约等于 knockbackDistance。</summary>
+        private void ApplyKnockback(Vector3 hitFrom)
+        {
+            Vector3 dir = transform.position - hitFrom;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 0.0001f)
+                dir = -transform.forward;      // 与攻击者完全重合时往自己身后推
+            dir.Normalize();
+
+            knockbackDir = dir;
+            knockbackTimeLeft = knockbackDuration;
+            // 线性衰减 v(t) = v0·(1 - t/T) 的总位移 = v0·T/2 → v0 = 2·距离/T
+            knockbackSpeed = 2f * knockbackDistance / Mathf.Max(0.01f, knockbackDuration);
+
+            // 打断咬击前摇：被打中时不再结算这次伤害（玩家抢刀能把它咬空）
+            if (attackRoutine != null)
+            {
+                StopCoroutine(attackRoutine);
+                attackRoutine = null;
+            }
+            lastAttackTime = Time.time;         // 击退后重新起冷却，避免贴脸连咬
+        }
+
+        private void UpdateKnockback()
+        {
+            float t = knockbackTimeLeft / Mathf.Max(0.01f, knockbackDuration);
+            controller.Move(knockbackDir * (knockbackSpeed * t * Time.deltaTime));
+            knockbackTimeLeft -= Time.deltaTime;
         }
 
         // ─── 状态：巡逻 ───
@@ -183,13 +239,31 @@ namespace FogHarbor.Enemy
             if (Time.time >= lastAttackTime + attackCooldown)
             {
                 lastAttackTime = Time.time;
-                var pc = player.GetComponent<PlayerController>();
-                if (pc != null)
-                {
-                    pc.TakeDamage(attackDamage);
-                    OnAttackLanded?.Invoke();
-                    Debug.Log($"[EnemyWolf] {name} 攻击玩家，造成 {attackDamage} 伤害");
-                }
+
+                // 先起手播动画，伤害等咬合帧再结算（避免"先掉血、后见咬"）
+                OnAttackStarted?.Invoke();
+                if (attackRoutine != null) StopCoroutine(attackRoutine);
+                attackRoutine = StartCoroutine(AttackRoutine());
+            }
+        }
+
+        /// <summary>攻击动作的伤害结算：等咬合时刻才判定（含距离复核），
+        /// 玩家在收招前走出范围则算被躲开（不结算伤害）。</summary>
+        private IEnumerator AttackRoutine()
+        {
+            yield return new WaitForSeconds(attackHitDelay);
+            attackRoutine = null;
+
+            if (state == WolfState.Dead) yield break;
+            if (player == null) yield break;
+            if (Vector3.Distance(transform.position, player.position) > attackRange * 1.4f) yield break;
+
+            var pc = player.GetComponent<PlayerController>();
+            if (pc != null)
+            {
+                pc.TakeDamage(attackDamage);
+                OnAttackLanded?.Invoke();
+                Debug.Log($"[EnemyWolf] {name} 咬中玩家，造成 {attackDamage} 伤害");
             }
         }
 
@@ -208,6 +282,10 @@ namespace FogHarbor.Enemy
             if (currentHp <= 0)
             {
                 Die();
+            }
+            else
+            {
+                ApplyKnockback(hitFrom);      // 未死才击退（死亡由回收流程接管，避免尸体滑行）
             }
         }
 
@@ -230,6 +308,8 @@ namespace FogHarbor.Enemy
                 SpawnDrop();
             }
 
+            if (attackRoutine != null) { StopCoroutine(attackRoutine); attackRoutine = null; }
+            knockbackTimeLeft = 0f;   // 清掉击退状态，避免复用后继续滑行
             if (deathRoutine != null) StopCoroutine(deathRoutine);
             deathRoutine = StartCoroutine(DeathRoutine());
         }
@@ -291,6 +371,7 @@ namespace FogHarbor.Enemy
         /// <summary>从池里重新激活时调用：重置 HP/状态/巡逻原点/颜色。</summary>
         public void ResetWolf(Vector3 spawnPosition)
         {
+            if (attackRoutine != null) { StopCoroutine(attackRoutine); attackRoutine = null; }
             if (deathRoutine != null) { StopCoroutine(deathRoutine); deathRoutine = null; }
             if (flashRoutine != null) { StopCoroutine(flashRoutine); flashRoutine = null; }
 
@@ -301,6 +382,7 @@ namespace FogHarbor.Enemy
             patrolWaitTimer = Random.Range(0.5f, 1.5f);
             lastAttackTime = -attackCooldown;
             verticalVelocity = 0f;
+            knockbackTimeLeft = 0f;
 
             transform.position = new Vector3(spawnPosition.x, 0.1f, spawnPosition.z);
             transform.rotation = Quaternion.identity;

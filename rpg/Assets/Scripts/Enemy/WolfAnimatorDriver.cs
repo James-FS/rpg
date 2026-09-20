@@ -32,16 +32,16 @@ namespace FogHarbor.Enemy
             animator = GetComponentInChildren<Animator>();
             lastPos = transform.position;
             currentClip = "";
-            wolf.OnAttackLanded += RestartAttackClip;
+            wolf.OnAttackStarted += RestartAttackClip;
         }
 
         private void OnDestroy()
         {
-            if (wolf != null) wolf.OnAttackLanded -= RestartAttackClip;
+            if (wolf != null) wolf.OnAttackStarted -= RestartAttackClip;
         }
 
-        /// <summary>每次真实咬中时从头重播 Attack：Attack 状态停留时间常长于 clip 本身，
-        /// 不重播会定格在收尾咬合帧直到玩家离开攻击范围。</summary>
+        /// <summary>每次开始攻击动作时从头播放 Attack：Attack 状态停留时间常长于 clip 本身，
+        /// 不重播会定格在收尾咬合帧直到玩家离开攻击范围。伤害由 EnemyWolf 在咬合帧单独结算。</summary>
         private void RestartAttackClip()
         {
             if (animator == null || wolf.CurrentState == EnemyWolf.WolfState.Dead) return;
