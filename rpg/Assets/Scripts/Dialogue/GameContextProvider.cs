@@ -11,9 +11,11 @@ namespace FogHarbor.Dialogue
 {
     /// <summary>
     /// 提供给 AIBot 的只读游戏状态快照（方案 §8.4 / §6.1 差距 #8）。
-    /// 只传必要状态：任务状态、目标物品持有、金币、物品列表、当前 NPC 好感。
+    /// 只传必要状态：剧情阶段、任务状态、目标物品持有、金币、背包清单、当前 NPC 好感。
     /// 魔法字符串已下沉：主任务 ID 与目标物品来自 QuestData，好感来自 RelationshipSystem。
     /// 不传 API Key、完整存档、文件路径或设备信息。
+    /// 字段命名注意：stage/favorability 与 Core 的 SimGameState 同名，会被 Server 合并进会话状态；
+    /// 背包用 inventory 而非 items——SimGameState.items 是模拟沙盒的字典字段，重名会让请求体解析失败。
     /// </summary>
     public class GameContextProvider : MonoBehaviour, IGameContext
     {
@@ -34,7 +36,21 @@ namespace FogHarbor.Dialogue
             if (relationshipSystem == null) Debug.LogWarning("[GameContextProvider] 未找到 RelationshipSystem");
         }
 
-        public int CurrentStage => 0;
+        /// <summary>剧情阶段由主任务状态推导，供 loreBlocks 的 unlockStage 门控与 Prompt「当前阶段」使用。</summary>
+        public int CurrentStage => ResolveStage();
+
+        private int ResolveStage()
+        {
+            string questId = questSystem != null ? questSystem.GetMainQuestId() : null;
+            if (string.IsNullOrEmpty(questId)) return 0;
+            switch (questSystem.GetState(questId))
+            {
+                case QuestState.Accepted: return 1;
+                case QuestState.Completed: return 2;
+                case QuestState.Rewarded: return 3;
+                default: return 0;   // Available 或未知状态
+            }
+        }
 
         private string GetCurrentNpcId()
         {
@@ -68,15 +84,17 @@ namespace FogHarbor.Dialogue
                     ["hasQuestTarget"] = !string.IsNullOrEmpty(targetItemId)
                         && inventory != null && inventory.Has(targetItemId, targetCount),
                     ["gold"] = rewardService != null ? rewardService.Gold : 0,
-                    ["items"] = GetItemList()
+                    ["inventory"] = GetItemList(),
+                    // 与 SimGameState 同名：Server 会把它合并进会话状态，工具与状态面板据此显示
+                    ["stage"] = CurrentStage
                 };
 
-                // 当前 NPC 好感（替换写死 linFavor=5）
+                // 当前 NPC 好感（favorability 与 SimGameState 同名，同样会被 Server 合并）
                 string npcId = GetCurrentNpcId();
                 if (!string.IsNullOrEmpty(npcId))
                 {
                     snapshot["npcId"] = npcId;
-                    snapshot["linFavor"] = relationshipSystem != null ? relationshipSystem.GetFavor(npcId) : 0;
+                    snapshot["favorability"] = relationshipSystem != null ? relationshipSystem.GetFavor(npcId) : 0;
                 }
 
                 return JsonConvert.SerializeObject(snapshot, Formatting.None);
