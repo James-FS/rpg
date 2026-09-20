@@ -68,16 +68,17 @@ namespace FogHarbor.Inventory
             return list;
         }
 
-        /// <summary>从存档恢复背包数据。</summary>
+        /// <summary>从存档恢复背包数据（data 为 null 表示空背包，同样要通知 UI 清空显示）。</summary>
         public void LoadFromData(List<InventoryEntry> data)
         {
             items.Clear();
-            if (data == null) return;
-
-            foreach (var entry in data)
+            if (data != null)
             {
-                if (!string.IsNullOrEmpty(entry.itemId) && entry.count > 0)
-                    items[entry.itemId] = entry.count;
+                foreach (var entry in data)
+                {
+                    if (!string.IsNullOrEmpty(entry.itemId) && entry.count > 0)
+                        items[entry.itemId] = entry.count;
+                }
             }
 
             Debug.Log($"[Inventory] 从存档恢复 {items.Count} 种物品");

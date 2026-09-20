@@ -191,6 +191,27 @@ namespace FogHarbor.Session
             return QuestResult.Ok($"已装备 {itemId}");
         }
 
+        /// <summary>卸下装备流程：EquipmentSystem 校验并脱下（物品退回背包）→ Save。</summary>
+        public QuestResult UnequipItem(string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId))
+                return QuestResult.Fail("缺少 itemId");
+
+            EquipmentSystem.EquipSlot slot;
+            if (equipmentSystem.WeaponId == itemId)
+                slot = EquipmentSystem.EquipSlot.Weapon;
+            else if (equipmentSystem.ArmorId == itemId)
+                slot = EquipmentSystem.EquipSlot.Armor;
+            else
+                return QuestResult.Fail($"未装备 {itemId}，无法卸下");
+
+            if (!equipmentSystem.Unequip(slot))
+                return QuestResult.Fail($"卸下 {itemId} 失败");
+
+            saveSystem.Save(player);
+            return QuestResult.Ok($"已卸下 {itemId}");
+        }
+
         /// <summary>使用消耗品流程：校验物品定义（只读）→ 回血 → 扣减背包 → Save。</summary>
         public QuestResult UseItem(string itemId)
         {

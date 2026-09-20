@@ -31,6 +31,10 @@ namespace FogHarbor.Items
         [SerializeField] private int defense;
         [SerializeField] private int healAmount;
 
+        [Header("外观")]
+        [Tooltip("装备后握在手里的模型（Prefab）；留空表示该物品没有手持外观")]
+        [SerializeField] private GameObject holdPrefab;
+
         [Header("标记")]
         [SerializeField] private bool isQuestItem;
 
@@ -41,6 +45,7 @@ namespace FogHarbor.Items
         public int Attack => attack;
         public int Defense => defense;
         public int HealAmount => healAmount;
+        public GameObject HoldPrefab => holdPrefab;
         public bool IsQuestItem => isQuestItem;
     }
 }

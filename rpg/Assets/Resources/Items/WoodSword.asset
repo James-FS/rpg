@@ -19,4 +19,5 @@ MonoBehaviour:
   attack: 3
   defense: 0
   healAmount: 0
+  holdPrefab: {fileID: 7154470350170791574, guid: 659655e6fbc1b85488e52c8ee1e15721, type: 3}
   isQuestItem: 0

@@ -16,6 +16,8 @@ namespace FogHarbor.Relationship
         [Header("身份")]
         [SerializeField] private string npcId;
         [SerializeField] private string displayName;
+        [Tooltip("对话框头部头像（留空则显示纯色占位）")]
+        [SerializeField] private Sprite portrait;
 
         [Header("好感")]
         [SerializeField] private int initialFavor;
@@ -26,6 +28,7 @@ namespace FogHarbor.Relationship
 
         public string NpcId => npcId;
         public string DisplayName => displayName;
+        public Sprite Portrait => portrait;
         public int InitialFavor => initialFavor;
 
         /// <summary>白名单查询：choiceId 是否允许记录；允许则输出好感变化量。</summary>
