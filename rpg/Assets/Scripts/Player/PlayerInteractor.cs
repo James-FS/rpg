@@ -24,14 +24,15 @@ namespace FogHarbor.Player
         {
             DetectInteractables();
 
-            if (nearestInteractable != null && Input.GetKeyDown(KeyCode.E))
+            // 面板打开时屏蔽交互键与提示（否则在对话框里按 E 会重复触发交互/重开对话）
+            if (!GameInput.Blocked && nearestInteractable != null && Input.GetKeyDown(KeyCode.E))
             {
                 nearestInteractable.Interact();
             }
 
             // 交互提示通过 UIManager 显示
             if (UIManager.Instance != null)
-                UIManager.Instance.SetPrompt(CurrentPrompt);
+                UIManager.Instance.SetPrompt(GameInput.Blocked ? "" : CurrentPrompt);
         }
 
         private void DetectInteractables()

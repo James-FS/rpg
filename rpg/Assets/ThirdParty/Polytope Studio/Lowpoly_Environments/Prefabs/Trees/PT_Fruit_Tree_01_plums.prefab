@@ -1,17 +1,18 @@
 %YAML 1.1
-%TAG !u! tag:unity3d.com,2011:
+%TAG !u! tag:yousandi.cn,2023:
 --- !u!1 &3503747439877303717
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
+  serializedVersion: 7
   m_Component:
   - component: {fileID: 8254891333303301210}
   - component: {fileID: 8222655170643054932}
   - component: {fileID: 1414196137617344592}
   m_Layer: 0
+  m_HasEditorInfo: 1
   m_Name: PT_Fruit_Tree_01_plums_LOD1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -58,6 +59,10 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_virtualGeometry: 0
+  m_ShadingRate: 0
+  m_ForceDisableGRD: 0
+  m_ForceDisableSmallMeshCull: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -84,17 +89,20 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+  m_MaskInteraction: 0
 --- !u!1 &7296054959696050501
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
+  serializedVersion: 7
   m_Component:
   - component: {fileID: 7929462325123785727}
   - component: {fileID: 2905107983372784782}
+  - component: {fileID: 4007775354880657836}
   m_Layer: 0
+  m_HasEditorInfo: 1
   m_Name: PT_Fruit_Tree_01_plums
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -146,18 +154,44 @@ LODGroup:
     renderers:
     - renderer: {fileID: 6140726643089354878}
   m_Enabled: 1
+  m_virtualGeometryAndShadow: 0
+  m_AllMeshesVirtualGeometryDisabled: 1
+--- !u!136 &4007775354880657836
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7296054959696050501}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 6.575604
+  m_Direction: 1
+  m_Center: {x: 0, y: 2.9956284, z: 0}
 --- !u!1 &7389196695646074697
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
+  serializedVersion: 7
   m_Component:
   - component: {fileID: 3661800321207667961}
   - component: {fileID: 9204582415525613151}
   - component: {fileID: 1987643193280244065}
   m_Layer: 0
+  m_HasEditorInfo: 1
   m_Name: PT_Fruit_Tree_01_plums_LOD0
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -204,6 +238,10 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_virtualGeometry: 0
+  m_ShadingRate: 0
+  m_ForceDisableGRD: 0
+  m_ForceDisableSmallMeshCull: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -230,18 +268,20 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+  m_MaskInteraction: 0
 --- !u!1 &7626970178412452963
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
+  serializedVersion: 7
   m_Component:
   - component: {fileID: 6965208583826785942}
   - component: {fileID: 4352938707021388631}
   - component: {fileID: 6140726643089354878}
   m_Layer: 0
+  m_HasEditorInfo: 1
   m_Name: PT_Fruit_Tree_01_plums_LOD2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -288,6 +328,10 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_virtualGeometry: 0
+  m_ShadingRate: 0
+  m_ForceDisableGRD: 0
+  m_ForceDisableSmallMeshCull: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -314,3 +358,4 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+  m_MaskInteraction: 0
