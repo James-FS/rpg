@@ -24,6 +24,12 @@ crashlytics-build.properties
 # ---- Codely 本地缓存（非工程内容）----
 rpg/.codely-cli/
 rpg/.codely.packages/
+rpg/.codelyignore
+rpg/.com-unity-codely.json
+
+# ---- AI 协作文档与 IDE 配置（仅保留本地）----
+rpg/CODELY.md
+rpg/.vsconfig
 
 # ---- 备份 / 杂项 ----
 *.bak
