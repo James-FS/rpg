@@ -45,9 +45,9 @@
 
 | 顺序 | 场景 | 内容 |
 | --- | --- | --- |
-| 1 | `Boot` | 引导场景，挂载 `AppRoot`（各系统单例 + 跨场景常驻） |
-| 2 | `Town` | 村镇：药师林洛（NPC）、药师小屋、主街石路、森林入口 |
-| 3 | `Forest` | 森林：月光药草、铁矿、灰狼刷新区、石板小径与成片林木 |
+| 1 | `Boot` | 引导场景，挂载 `AppRoot`（各系统单例 + 跨场景常驻），内嵌 `GameUI` 实例 |
+| 2 | `Town` | 村镇：主街三栋建筑（铁匠铺 / 石屋 / 药师小屋）、重铺石板路网、外圈林带环绕的 120×120 大地图、森林入口 |
+| 3 | `Forest` | 森林：月光药草、铁矿、灰狼刷新区、石板小径与成片林木、地标立石 |
 
 主流程：
 
@@ -61,16 +61,18 @@
 
 ## 已实现功能
 
-- **玩家控制**：走 / 跑（Shift）、跳跃（含土狼时间与输入缓冲）、采集动作定身与 Gather 动画；`IsGrounded / IsBusy / IsJumping` 对外查询接口。
+- **玩家控制**：走 / 跑（Shift）、跳跃（含土狼时间与输入缓冲）、采集动作定身与 Gather 动画；鼠标视角跟随。
+- **战斗动作**：拔剑 / 收剑过渡（Pro Sword and Shield 动作包）、三段攻击连段、攻击仅驱动上半身（`PlayerUpperBody.mask`，行走攻击两不误）、手持武器外观随装备切换（`PlayerWeaponVisual`）。
+- **输入管理**：`GameInput` 统一屏蔽闸门——面板打开时屏蔽交互 / 攻击键，防止误触发；`GameCursor` 管理游标。
 - **交互**：`E` 键交互（`IInteractable`），采集拾取、对话触发。
-- **AIBot 对话**：流式 LLM 对话，NPC 具备游戏状态快照（任务进度、目标物、好感度）。
+- **AIBot 对话**：流式 LLM 对话，NPC 具备游戏状态快照（剧情阶段、任务进度、目标物、好感度），字段与 Server 端模拟状态对齐；对话框支持 NPC 头像。
 - **任务系统**：主线「寻找月光药草」+ 支线「收集铁矿」，状态机推进、拾取自动推进目标、发奖幂等。
 - **AIBot 工具链**：`get_quest_status` / `accept_quest` / `complete_quest` / `record_player_choice`，由游戏端真实执行。
 - **好感度 / 关系**：`RelationshipSystem` 记录玩家选择、按白名单增减好感，随存档持久化，跨 Session 长期记忆（`player_npc` 摘要）。
-- **背包 / 装备**：物品数量、拾取、消耗；木剑 / 铁剑 / 布衣，装备属性真实接入战斗（攻击加成、防御减伤）。
-- **战斗**：灰狼（巡逻 / 追击 / 攻击 / 死亡状态机），受击反馈与死亡掉落。
+- **背包 / 装备**：物品数量、拾取、消耗、**卸下装备**；木剑 / 石剑 / 铁剑（均有手持模型），装备属性真实接入战斗（攻击加成、防御减伤）。
+- **战斗**：灰狼（巡逻 / 追击 / 攻击 / 死亡状态机），伤害结算对齐动画咬合帧（前摇 0.36s），受击击退可打断咬击前摇（抢刀机制）。
 - **存档**：单槽位 JSON，启动自动读档，恢复任务 / 背包 / 装备 / 好感 / 玩家状态。
-- **UI**：HUD（金币 / HP / 当前目标 / 伤害飘字 / 任务完成提示）、对话面板、背包 / 任务 / 装备面板，中文 TMP 动态字体。
+- **UI**：HUD（金币 / HP / 当前目标 / 伤害飘字）、屏幕侧边任务追踪面板、对话 / 背包 / 任务 / 装备面板；UI 支持「场景实例 → Prefab（`Resources/UI/GameUI`）→ 代码构建」三级来源，可由编辑器菜单 `Tools/雾港小镇/烘焙 UI 预制体` 生成；中文 TMP 动态字体。
 
 ---
 
@@ -83,15 +85,16 @@ rpg/                         # ← 团结引擎工程根（用引擎打开这一
 │   ├── Scripts/             # 全部 C#，按系统分模块
 │   │   ├── Bootstrap/       # AppRoot 引导与系统装配
 │   │   ├── Session/         # GameSession：跨系统流程层（唯一编排入口）
-│   │   ├── Player/          # 控制器、相机跟随、交互
+│   │   ├── Player/          # 控制器、相机跟随、交互、输入屏蔽、武器外观
 │   │   ├── Dialogue/        # NPC 交互、AIBot 上下文与工具宿主
 │   │   ├── Quest/           # 任务状态机、奖励服务
 │   │   ├── Inventory/ Equipment/ Items/
-│   │   ├── Relationship/    # 好感度与 NPC 档案
+│   │   ├── Relationship/    # 好感度与 NPC 档案（含头像）
 │   │   ├── Enemy/ UI/ Save/ World/
-│   ├── Data/ Resources/     # ScriptableObject 数据（任务 / 物品 / NPC 档案）
-│   ├── Prefabs/             # 敌人等预制体
-│   ├── Art/                 # 项目自有美术（环境 / 角色 / 道具）
+│   ├── Editor/              # 编辑器工具（UI 预制体烘焙菜单）
+│   ├── Data/ Resources/     # ScriptableObject 数据（任务 / 物品 / NPC 档案）与 UI Prefab
+│   ├── Prefabs/             # Player / 敌人预制体
+│   ├── Art/                 # 项目自有美术（建筑 / 角色 / 道具 / 材质 / UI 图标与头像）
 │   ├── Settings/            # URP 管线与渲染器资产
 │   └── ThirdParty/          # 第三方资源（见下）
 ├── Packages/                # URP、TMP 等依赖清单
@@ -109,14 +112,18 @@ rpg/                         # ← 团结引擎工程根（用引擎打开这一
 | 资源包 | 用途 |
 | --- | --- |
 | **Mixamo（Adobe）** | 玩家角色 `Character_Rigged` 与 NPC 药师林洛的模型、骨骼与动画 |
+| **Pro Sword and Shield Pack** | 玩家拔剑 / 收剑 / 挥剑攻击动画（`Art/Characters/Player/Animations/`） |
+| **Quaternius · Universal Animation Library** | 玩家通用动画（跳跃、舞蹈等） |
+| **Quaternius · Modular Outfits Fantasy** | 模块化角色服装（ peasant / ranger 等，供外观换装） |
+| **Quaternius · Zombie Apocalypse Kit** | 灰狼模型（低模德牧）与动画 |
 | **Kenney · Nature Kit** | 路面石板（`path_stone`）、街边原木 |
 | **Kenney · Blocky Characters** | 早期占位角色（已由 Mixamo 角色替换） |
-| **Quaternius · Zombie Apocalypse Kit** | 灰狼模型（低模德牧）与动画 |
 | **Polytope Studio · Low Poly Environment** | 树木 / 花草 / 灌木 / 蘑菇 / 岩石等地物 |
 | **SimpleNaturePack** | 树桩等少量地物 |
 | **Free Viking Pack** | 镇内维京高脚屋（装饰建筑） |
+| **Alebardium · Bloodlines UI** | UI 素材 |
 
-项目自有美术（AI 生成与整理）位于 `rpg/Assets/Art/`，包含角色、建筑、道具与材质。
+项目自有美术（AI 生成与整理）位于 `rpg/Assets/Art/`，包含建筑（铁匠铺 / 石屋 / 药师小屋）、武器模型（木剑 / 石剑 / 铁剑 / 铁矿）、UI 图标与 NPC 头像、路面材质等。
 
 具体署名与许可信息见 [`rpg/Assets/ThirdParty/ATTRIBUTIONS.md`](rpg/Assets/ThirdParty/ATTRIBUTIONS.md)。
 
@@ -125,5 +132,6 @@ rpg/                         # ← 团结引擎工程根（用引擎打开这一
 ## 说明
 
 - **策划 / 设计 / 剧本文档不随仓库分发**（保留在作者本地），因此本仓库只包含可运行的工程与代码。
-- `rpg/CODELY.md` 为 AI 辅助开发工具（Codely）的工程记忆与开发日志，非游戏内容。
+- `rpg/CODELY.md`（AI 辅助开发日志）、`.codelyignore`、`.com-unity-codely.json`、`.vsconfig` 等协作 / IDE 配置文件仅保留在本地，不入库。
+- 开发过程截图与录屏（`rpg/screenshots/`）、原始美术源文件（`art/`）也已在 `.gitignore` 中排除。
 - 仓库根目录下的 `_rpg_*` 备份目录、`Library/`、`obj/`、IDE 工程文件等均已通过 `.gitignore` 排除。
