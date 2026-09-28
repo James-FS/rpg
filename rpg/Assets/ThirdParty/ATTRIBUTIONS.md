@@ -21,7 +21,7 @@
 - **授权**：CC0（公有领域，个人/商用均可，无需署名）
 - **本地路径**：`Assets/ThirdParty/Kenney/BlockyCharacters/`
 - **导入日期**：2026-09-06
-- **备注**：2026-09-13 林洛已替换为 Mixamo 模型（见下），`character-i` / `texture-i` / `BlockyNpcIdle.controller` 已不再被场景引用，并整体移入外部备份 `D:\Code\rpg\_rpg_removed_assets_20260913\npc_swap_20260913\`（保留 .meta，可拷回恢复）。玩家与 NPC 动画控制器现位于：`Assets/Art/Animations/PlayerHumanoid.controller`、`Assets/Art/Animations/NpcLinIdle.controller`。
+- **备注**：2026-09-13 林洛已替换为 Mixamo 模型（见下），`character-i` / `texture-i` / `BlockyNpcIdle.controller` 已不再被场景引用，并整体移入外部备份 `D:\Code\rpg\_rpg_removed_assets_20260913\npc_swap_20260913\`（保留 .meta，可拷回恢复）。玩家与 NPC 动画控制器现位于：`Assets/Art/Animations/Player/PlayerIdle.controller`、`Assets/Art/Animations/Npc/NpcLinIdle.controller`。
 
 ## Mixamo（Adobe）· 角色模型
 
@@ -31,7 +31,7 @@
 - **本地路径**：
   - 玩家：`Assets/Art/Characters/Player/`（`Character_Rigged.fbx` + 贴图 + `Animations/`（Idle/Walk/Run/Gather））
   - 林洛：`Assets/Art/Characters/herbalist/`（`herbalist_mixamo.fbx` + `herbalist_basecolor.png` + `herbalist_body.mat`）
-- **备注**：两个模型均按 Humanoid 导入（自动生成 Avatar）；林洛使用 `NpcLinIdle.controller`（复用玩家 Idle 剪辑，经 Humanoid 重定向）；玩家使用 `PlayerHumanoid.controller`（speed 混合树）。比例基准：玩家高 2.70m；林洛 2.45m（比玩家略矮、体型偏瘦）。
+- **备注**：两个模型均按 Humanoid 导入（自动生成 Avatar）；林洛使用 `NpcLinIdle.controller`（复用玩家 Idle 剪辑，经 Humanoid 重定向）；玩家预制体当前使用 `PlayerIdle.controller`。比例基准：玩家高 2.70m；林洛 2.45m（比玩家略矮、体型偏瘦）。
 
 ## Quaternius · Zombie Apocalypse Kit（德国牧羊犬/狼）
 
