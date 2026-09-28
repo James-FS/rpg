@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
 using FogHarbor.Enemy;
 using FogHarbor.UI;
 
@@ -36,24 +37,16 @@ namespace FogHarbor.Player
 
         [Header("攻击")]
         [SerializeField] private float attackRange = 2f;
-        [SerializeField] private float attackCooldown = 1f;
+        [SerializeField] private float attackCooldown = 1.7f;
         [SerializeField] private int baseAttackDamage = 5;
-        [Tooltip("连段重置时间（秒）：距上次出招超过该时间后，下一击回到第一段（外砍）")]
-        [SerializeField] private float attackComboResetTime = 2.5f;
-        [Tooltip("第一段·外砍（OutwardSlash）的定身时长（秒）")]
-        [SerializeField] private float attackOutLockTime = 1.3f;
-        [Tooltip("第二段·内砍（InwardSlash）的定身时长（秒）")]
-        [SerializeField] private float attackInLockTime = 1.4f;
-        [Tooltip("第一段命中判定延迟（秒）：起手到剑最前伸的帧（实测 0.95s）")]
-        [SerializeField] private float attackOutHitDelay = 0.95f;
-        [Tooltip("第二段命中判定延迟（秒）：起手到剑最前伸的帧（实测 1.34s）")]
-        [SerializeField] private float attackInHitDelay = 1.34f;
+        [Tooltip("移动中跳劈的前进距离（米）；原地跳劈不位移")]
+        [SerializeField] private float jumpAttackTravelDistance = 1.2f;
 
         [Header("拔刀 / 收刀")]
         [Tooltip("拔刀动作的定身时长（秒），应略长于 WithdrawingSword 动画播完+过渡的总时长（≈1.4s）")]
         [SerializeField] private float drawSwordLockTime = 1.45f;
-        [Tooltip("收刀动作的定身时长（秒），应略长于 SheathingSword 动画播完+过渡的总时长（≈1.55s）")]
-        [SerializeField] private float sheatheSwordLockTime = 1.6f;
+        [Tooltip("收刀动作的定身时长（秒），应略长于 SheathingSword 动画播完+过渡的总时长（≈1.2s）")]
+        [SerializeField] private float sheatheSwordLockTime = 1.7f;
 
         [Header("防御")]
         [SerializeField] private int baseDefense = 0;
@@ -62,15 +55,19 @@ namespace FogHarbor.Player
         [SerializeField] private int maxHp = 100;
 
         private CharacterController controller;
+        private float standingHeight;
+        private Vector3 standingCenter;
+        private bool isCrouching;
         private float verticalVelocity;
-        private float lastAttackTime;
-        private Coroutine attackRoutine;
+        private float lastAttackTime = float.NegativeInfinity;
+        private bool attackInProgress;
+        private bool attackHitApplied;
+        private float attackSafetyUntil;
+        private Vector3 jumpAttackDirection;
+        private float jumpAttackTravelProgress;
+        private Vector3 jumpAttackPendingMotion;
+        private bool jumpAttackActive;
         private int currentHp;
-
-        // 攻击连段状态（0=外砍 / 1=内砍，交替循环；间隔过久自动重置）
-        private int attackComboIndex;
-        private float lastComboTime = -999f;
-        private float lastAttackHitDelay = 0.9f;
 
         // 跳跃状态
         private float lastGroundedTime = -999f;
@@ -96,11 +93,8 @@ namespace FogHarbor.Player
         /// <summary>收刀动作开始时触发（动画层订阅后播放收刀动画）。</summary>
         public event Action OnSheatheSwordStarted;
 
-        /// <summary>第一段攻击（外砍）开始时触发（动画层订阅后播放对应斩击动画）。</summary>
-        public event Action OnAttackOutStarted;
-
-        /// <summary>第二段攻击（内砍）开始时触发（动画层订阅后播放对应斩击动画）。</summary>
-        public event Action OnAttackInStarted;
+        /// <summary>单次剑击开始时触发，供动画与持剑外观订阅。</summary>
+        public event Action OnAttackStarted;
 
         public int CurrentHp => currentHp;
         public int MaxHp => maxHp;
@@ -124,10 +118,13 @@ namespace FogHarbor.Player
         public bool IsGrounded => controller != null && controller.isGrounded;
 
         /// <summary>是否处于采集等定身状态（外部脚本/AI 可查询）。</summary>
-        public bool IsBusy => Time.time < busyUntil;
+        public bool IsBusy => Time.time < busyUntil || (attackInProgress && Time.time < attackSafetyUntil);
 
         /// <summary>是否处于跳跃后的腾空状态。</summary>
         public bool IsJumping => isJumping;
+
+        /// <summary>按住 Ctrl 时保持蹲姿；头顶空间不足时松开 Ctrl 仍保持蹲姿。</summary>
+        public bool IsCrouching => isCrouching;
 
         /// <summary>
         /// 请求一次跳跃。键盘输入与外部脚本（测试/AI）共用同一入口，
@@ -135,6 +132,7 @@ namespace FogHarbor.Player
         /// </summary>
         public void RequestJump()
         {
+            if (isCrouching) return;
             jumpRequestTime = Time.time;
         }
 
@@ -153,32 +151,64 @@ namespace FogHarbor.Player
             busyUntil = Time.time + gatherLockTime;
         }
 
-        /// <summary>
-        /// 播放一次攻击动作（连段：第 1 击外砍 OutwardSlash → 第 2 击内砍 InwardSlash，交替循环；
-        /// 距上次出招超过 attackComboResetTime 后重置回第一段）。
-        /// 键盘输入与外部脚本（测试/AI）共用同一入口；伤害判定仍在 HandleAttack 里做。
-        /// </summary>
+        /// <summary>播放一次剑击；鼠标输入和外部调用共用此入口。</summary>
         public void PlayAttack()
         {
-            if (Time.time - lastComboTime > attackComboResetTime)
-                attackComboIndex = 0;
+            if (IsBusy || Time.time < lastAttackTime + attackCooldown)
+                return;
 
-            bool inward = attackComboIndex % 2 == 1;
-            if (inward)
+            lastAttackTime = Time.time;
+            attackInProgress = true;
+            attackHitApplied = false;
+            jumpAttackDirection = isJumping && !GameInput.Blocked
+                ? InputDirectionToWorld(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"))
+                : Vector3.zero;
+            if (jumpAttackDirection.sqrMagnitude > 0.01f)
+                transform.rotation = Quaternion.LookRotation(jumpAttackDirection);
+            // Only a safety net for a missing Animator callback; normal recovery comes from Attack state exit.
+            attackSafetyUntil = Time.time + 4f;
+            OnAttackStarted?.Invoke();
+        }
+
+        /// <summary>由 Attack 状态回调；命中和动作锁定跟随动画进度。</summary>
+        public void OnAttackAnimationEnter(bool isJumpAttack)
+        {
+            attackInProgress = true;
+            attackHitApplied = false;
+            attackSafetyUntil = Time.time + 4f;
+            jumpAttackActive = isJumpAttack;
+            jumpAttackTravelProgress = 0f;
+        }
+
+        public void OnAttackAnimationProgress(float normalizedTime, float hitProgress)
+        {
+            if (!attackInProgress)
+                return;
+
+            if (jumpAttackActive && jumpAttackDirection.sqrMagnitude > 0.01f)
             {
-                OnAttackInStarted?.Invoke();
-                busyUntil = Time.time + attackInLockTime;
-                lastAttackHitDelay = attackInHitDelay;
-            }
-            else
-            {
-                OnAttackOutStarted?.Invoke();
-                busyUntil = Time.time + attackOutLockTime;
-                lastAttackHitDelay = attackOutHitDelay;
+                // Move the actual collision body during the lunge; completed distance remains after the state exits.
+                float progress = Mathf.Clamp01(normalizedTime / 0.7f);
+                progress = progress * progress * (3f - 2f * progress);
+                float delta = Mathf.Max(0f, progress - jumpAttackTravelProgress);
+                // Animator updates after Update. Apply this on the next movement tick, before gravity,
+                // so the final CharacterController.Move of the frame retains the ground contact.
+                jumpAttackPendingMotion += jumpAttackDirection * (jumpAttackTravelDistance * delta);
+                jumpAttackTravelProgress = progress;
             }
 
-            attackComboIndex++;
-            lastComboTime = Time.time;
+            if (attackHitApplied || normalizedTime < hitProgress)
+                return;
+
+            attackHitApplied = true;
+            ResolveAttackHit();
+        }
+
+        public void OnAttackAnimationExit()
+        {
+            attackInProgress = false;
+            jumpAttackActive = false;
+            jumpAttackDirection = Vector3.zero;
         }
 
         /// <summary>播放一次拔刀动作：短暂定身（期间移动/跳跃输入无效）。
@@ -199,13 +229,46 @@ namespace FogHarbor.Player
         private void Awake()
         {
             controller = GetComponent<CharacterController>();
+            standingHeight = controller.height;
+            standingCenter = controller.center;
             currentHp = maxHp;
         }
 
         private void Update()
         {
+            HandleCrouch();
             HandleMovement();
             HandleAttack();
+        }
+
+        private void HandleCrouch()
+        {
+            bool held = !GameInput.Blocked
+                && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl));
+            if (IsBusy || isJumping || held == isCrouching)
+                return;
+
+            if (!held && !CanStandUp())
+                return;
+
+            isCrouching = held;
+            float height = held ? Mathf.Max(controller.radius * 2.1f, standingHeight * 0.6f) : standingHeight;
+            controller.height = height;
+            controller.center = standingCenter - Vector3.up * ((standingHeight - height) * 0.5f);
+        }
+
+        private bool CanStandUp()
+        {
+            float radius = controller.radius * 0.95f;
+            Vector3 center = transform.TransformPoint(standingCenter);
+            Vector3 offset = transform.up * (standingHeight * 0.5f - radius - 0.03f);
+            foreach (Collider hit in Physics.OverlapCapsule(center - offset, center + offset,
+                         radius, ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (!hit.transform.IsChildOf(transform))
+                    return false;
+            }
+            return true;
         }
 
         /// <summary>
@@ -225,6 +288,7 @@ namespace FogHarbor.Player
         {
             // 有面板打开时屏蔽世界输入：重力照常，但移动/奔跑/跳跃都不响应
             bool blocked = GameInput.Blocked;
+            bool grounded = controller.isGrounded;
 
             float h = blocked ? 0f : Input.GetAxisRaw("Horizontal");
             float v = blocked ? 0f : Input.GetAxisRaw("Vertical");
@@ -235,7 +299,7 @@ namespace FogHarbor.Player
             bool sprinting = !blocked && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
             float speed = sprinting ? runSpeed : walkSpeed;
 
-            if (!IsBusy && direction.sqrMagnitude > 0.01f)
+            if (!IsBusy && !isCrouching && direction.sqrMagnitude > 0.01f)
             {
                 controller.Move(direction * speed * Time.deltaTime);
 
@@ -244,16 +308,21 @@ namespace FogHarbor.Player
                     transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
             }
 
+            if (jumpAttackPendingMotion.sqrMagnitude > 0.000001f)
+            {
+                controller.Move(jumpAttackPendingMotion);
+                jumpAttackPendingMotion = Vector3.zero;
+            }
+
             // 跳跃输入：空格。与 RequestJump() 同一入口，便于外部脚本/AI 触发。
             if (!blocked && Input.GetKeyDown(KeyCode.Space))
                 RequestJump();
 
-            bool grounded = controller.isGrounded;
             if (grounded)
                 lastGroundedTime = Time.time;
 
             // 起跳判定：在输入缓冲期内、且仍在离地宽限期内（且未处于腾空状态，防二段跳）
-            if (!isJumping && !IsBusy
+            if (!isJumping && !IsBusy && !isCrouching
                 && Time.time - jumpRequestTime <= jumpBufferTime
                 && Time.time - lastGroundedTime <= coyoteTime)
             {
@@ -280,42 +349,43 @@ namespace FogHarbor.Player
 
         private void HandleAttack()
         {
-            // 面板打开时鼠标左键留给 UI（点对话框/背包不会再挥砍）；外部脚本仍可调 PlayAttack()
-            if (GameInput.Blocked) return;
-
-            if (!IsBusy && Input.GetMouseButtonDown(0) && Time.time >= lastAttackTime + attackCooldown)
-            {
-                lastAttackTime = Time.time;
+            // 面板打开时鼠标左键留给 UI；外部脚本仍可调 PlayAttack()。
+            if (!GameInput.Blocked && Input.GetMouseButtonDown(0)
+                && !(EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()))
                 PlayAttack();
-
-                // 命中结算延后到剑身接触帧：没挥到就不掉血、不击退（与狼的"咬合帧才结算"同一套做法）
-                if (attackRoutine != null) StopCoroutine(attackRoutine);
-                attackRoutine = StartCoroutine(AttackHitRoutine(lastAttackHitDelay));
-            }
         }
 
-        /// <summary>挥砍命中结算：等剑到最前伸的时刻再做范围判定（延迟由当前连段段的实测值决定）。
+        /// <summary>挥砍命中结算：由 Attack 状态到达剑刃接触进度时调用。
         /// 击退由 EnemyWolf.TakeDamage 内部处理，所以"打到哪一刻推哪一刻"。</summary>
-        private IEnumerator AttackHitRoutine(float hitDelay)
+        private void ResolveAttackHit()
         {
-            yield return new WaitForSeconds(hitDelay);
-            attackRoutine = null;
-
             Vector3 center = transform.position + transform.forward * attackRange * 0.5f;
             Collider[] hits = Physics.OverlapSphere(center, attackRange * 0.5f);
+            EnemyWolf target = null;
+            float nearestSqrDistance = float.PositiveInfinity;
 
             foreach (var hit in hits)
             {
-                if (hit.gameObject == gameObject) continue;
+                var wolf = hit.GetComponentInParent<EnemyWolf>();
+                if (wolf == null || wolf.CurrentState == EnemyWolf.WolfState.Dead)
+                    continue;
 
-                var wolf = hit.GetComponent<EnemyWolf>();
-                if (wolf != null)
+                Vector3 toWolf = wolf.transform.position - transform.position;
+                toWolf.y = 0f;
+                if (Vector3.Dot(transform.forward, toWolf) <= 0f)
+                    continue;
+
+                float sqrDistance = toWolf.sqrMagnitude;
+                if (sqrDistance < nearestSqrDistance)
                 {
-                    wolf.TakeDamage(AttackDamage, transform.position);
-                    Debug.Log($"[PlayerController] 击中灰狼，造成 {AttackDamage} 点伤害");
-                    break; // 一次攻击只打中一个目标
+                    target = wolf;
+                    nearestSqrDistance = sqrDistance;
                 }
             }
+
+            if (target == null) return;
+            target.TakeDamage(AttackDamage, transform.position);
+            Debug.Log($"[PlayerController] 击中灰狼，造成 {AttackDamage} 点伤害");
         }
 
         /// <summary>外部调用：让玩家受到伤害（防御减伤：总防御抵扣伤害，最少 1 点）。</summary>

@@ -50,6 +50,8 @@ namespace FogHarbor.Enemy
         [SerializeField] private float knockbackDistance = 1.4f;
         [Tooltip("击退持续时间（秒）：期间由击退接管移动，AI 不移动")]
         [SerializeField] private float knockbackDuration = 0.25f;
+        [Tooltip("受击变红持续时间（秒）")]
+        [SerializeField] private float hitFlashDuration = 0.16f;
 
         [Header("碰撞体（需匹配模型缩放：模型×1.7 时 0.98→1.66 高）")]
         [SerializeField] private float ccRadius = 0.5f;
@@ -65,19 +67,20 @@ namespace FogHarbor.Enemy
         private Vector3 homePosition;
         private Vector3 patrolTarget;
         private float patrolWaitTimer;
-        private Renderer bodyRenderer;
-        private Color originalColor;
+        private Renderer[] bodyRenderers;
+        private MaterialPropertyBlock colorBlock;
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private Coroutine flashRoutine;
         private Coroutine deathRoutine;
         private Coroutine attackRoutine;
 
-        // 击退状态：>0 时由击退接管移动（AI 行为暂停），速度按剩余时间线性衰减
+        // 击退状态：>0 时由击退接管移动（AI 行为暂停）
         private float knockbackTimeLeft;
         private Vector3 knockbackDir;
-        private float knockbackSpeed;
 
         public int CurrentHp => currentHp;
         public int MaxHp => maxHp;
+        public bool IsKnockedBack => knockbackTimeLeft > 0f;
 
         /// <summary>当前状态（供 WolfAnimatorDriver 驱动动画，不改动内部状态机）。</summary>
         public WolfState CurrentState => state;
@@ -99,12 +102,8 @@ namespace FogHarbor.Enemy
             currentHp = maxHp;
             lastAttackTime = -attackCooldown;
 
-            var renderer = GetComponentInChildren<Renderer>();
-            if (renderer != null)
-            {
-                bodyRenderer = renderer;
-                originalColor = renderer.material.color;
-            }
+            bodyRenderers = GetComponentsInChildren<Renderer>(true);
+            colorBlock = new MaterialPropertyBlock();
         }
 
         private void OnEnable()
@@ -119,21 +118,23 @@ namespace FogHarbor.Enemy
         {
             if (state == WolfState.Dead) return;
             if (controller == null) return;
-            ApplyGravity();
+            Vector3 movement = Vector3.up * ApplyGravity();
 
-            // 被击退期间：由击退接管移动，AI 行为（巡逻/追击/攻击）暂停
+            // 水平移动与重力一次提交，保留 CharacterController 的接地结果。
             if (knockbackTimeLeft > 0f)
             {
-                UpdateKnockback();
+                movement += UpdateKnockback();
+                controller.Move(movement);
                 return;
             }
 
             switch (state)
             {
-                case WolfState.Patrol: UpdatePatrol(); break;
-                case WolfState.Chase: UpdateChase(); break;
+                case WolfState.Patrol: movement += UpdatePatrol(); break;
+                case WolfState.Chase: movement += UpdateChase(); break;
                 case WolfState.Attack: UpdateAttack(); break;
             }
+            controller.Move(movement);
         }
 
         // ─── 击退 ───
@@ -149,8 +150,6 @@ namespace FogHarbor.Enemy
 
             knockbackDir = dir;
             knockbackTimeLeft = knockbackDuration;
-            // 线性衰减 v(t) = v0·(1 - t/T) 的总位移 = v0·T/2 → v0 = 2·距离/T
-            knockbackSpeed = 2f * knockbackDistance / Mathf.Max(0.01f, knockbackDuration);
 
             // 打断咬击前摇：被打中时不再结算这次伤害（玩家抢刀能把它咬空）
             if (attackRoutine != null)
@@ -158,30 +157,35 @@ namespace FogHarbor.Enemy
                 StopCoroutine(attackRoutine);
                 attackRoutine = null;
             }
+            state = WolfState.Chase;
             lastAttackTime = Time.time;         // 击退后重新起冷却，避免贴脸连咬
         }
 
-        private void UpdateKnockback()
+        private Vector3 UpdateKnockback()
         {
-            float t = knockbackTimeLeft / Mathf.Max(0.01f, knockbackDuration);
-            controller.Move(knockbackDir * (knockbackSpeed * t * Time.deltaTime));
-            knockbackTimeLeft -= Time.deltaTime;
+            float duration = Mathf.Max(0.01f, knockbackDuration);
+            float next = Mathf.Max(0f, knockbackTimeLeft - Time.deltaTime);
+            // 线性减速的积分；距离不随帧率或最后一帧的时长改变。
+            float fraction = (knockbackTimeLeft * knockbackTimeLeft - next * next)
+                / (duration * duration);
+            knockbackTimeLeft = next;
+            return knockbackDir * (knockbackDistance * fraction);
         }
 
         // ─── 状态：巡逻 ───
 
-        private void UpdatePatrol()
+        private Vector3 UpdatePatrol()
         {
             if (player != null && Vector3.Distance(transform.position, player.position) <= detectRange)
             {
                 state = WolfState.Chase;
-                return;
+                return Vector3.zero;
             }
 
             if (patrolWaitTimer > 0f)
             {
                 patrolWaitTimer -= Time.deltaTime;
-                return;
+                return Vector3.zero;
             }
 
             if (Vector3.Distance(transform.position, patrolTarget) < 0.3f)
@@ -190,7 +194,7 @@ namespace FogHarbor.Enemy
                 patrolTarget = homePosition + new Vector3(
                     Random.Range(-patrolRadius, patrolRadius), 0f,
                     Random.Range(-patrolRadius, patrolRadius));
-                return;
+                return Vector3.zero;
             }
 
             Vector3 dir = patrolTarget - transform.position;
@@ -198,29 +202,31 @@ namespace FogHarbor.Enemy
             if (dir.sqrMagnitude > 0.01f)
             {
                 dir.Normalize();
-                controller.Move(dir * patrolSpeed * Time.deltaTime);
                 FaceDirection(dir);
+                return dir * (patrolSpeed * Time.deltaTime);
             }
+            return Vector3.zero;
         }
 
         // ─── 状态：追击 ───
 
-        private void UpdateChase()
+        private Vector3 UpdateChase()
         {
-            if (player == null) { state = WolfState.Patrol; return; }
+            if (player == null) { state = WolfState.Patrol; return Vector3.zero; }
 
             float dist = Vector3.Distance(transform.position, player.position);
-            if (dist > loseRange) { state = WolfState.Patrol; return; }
-            if (dist <= attackRange) { state = WolfState.Attack; return; }
+            if (dist > loseRange) { state = WolfState.Patrol; return Vector3.zero; }
+            if (dist <= attackRange) { state = WolfState.Attack; return Vector3.zero; }
 
             Vector3 dir = player.position - transform.position;
             dir.y = 0f;
             if (dir.sqrMagnitude > 0.01f)
             {
                 dir.Normalize();
-                controller.Move(dir * chaseSpeed * Time.deltaTime);
                 FaceDirection(dir);
+                return dir * (chaseSpeed * Time.deltaTime);
             }
+            return Vector3.zero;
         }
 
         // ─── 状态：攻击 ───
@@ -254,7 +260,7 @@ namespace FogHarbor.Enemy
             yield return new WaitForSeconds(attackHitDelay);
             attackRoutine = null;
 
-            if (state == WolfState.Dead) yield break;
+            if (state != WolfState.Attack) yield break;
             if (player == null) yield break;
             if (Vector3.Distance(transform.position, player.position) > attackRange * 1.4f) yield break;
 
@@ -294,8 +300,8 @@ namespace FogHarbor.Enemy
             if (state == WolfState.Dead) return;
             state = WolfState.Dead;
 
-            if (bodyRenderer != null)
-                bodyRenderer.material.color = new Color(0.28f, 0.28f, 0.30f, 1f);
+            if (flashRoutine != null) { StopCoroutine(flashRoutine); flashRoutine = null; }
+            SetBodyColor(new Color(0.28f, 0.28f, 0.30f, 1f), 1f);
 
             if (UIManager.Instance != null)
                 UIManager.Instance.ShowToast("击败了灰狼！");
@@ -352,18 +358,40 @@ namespace FogHarbor.Enemy
 
         private void FlashHit()
         {
-            if (bodyRenderer == null) return;
+            if (bodyRenderers == null || bodyRenderers.Length == 0) return;
             if (flashRoutine != null) StopCoroutine(flashRoutine);
             flashRoutine = StartCoroutine(FlashRoutine());
         }
 
         private IEnumerator FlashRoutine()
         {
-            bodyRenderer.material.color = Color.red;
-            yield return new WaitForSeconds(0.12f);
-            if (bodyRenderer != null)
-                bodyRenderer.material.color = originalColor;
+            SetBodyColor(new Color(1f, 0.08f, 0.08f, 1f), 0.85f);
+            yield return new WaitForSeconds(hitFlashDuration);
+            RestoreBodyColor();
             flashRoutine = null;
+        }
+
+        private void SetBodyColor(Color tint, float strength)
+        {
+            foreach (Renderer renderer in bodyRenderers)
+            {
+                Material[] materials = renderer.sharedMaterials;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    Material material = materials[i];
+                    if (material == null || !material.HasProperty(BaseColorId)) continue;
+                    renderer.GetPropertyBlock(colorBlock, i);
+                    colorBlock.SetColor(BaseColorId, Color.Lerp(material.GetColor(BaseColorId), tint, strength));
+                    renderer.SetPropertyBlock(colorBlock, i);
+                }
+            }
+        }
+
+        private void RestoreBodyColor()
+        {
+            foreach (Renderer renderer in bodyRenderers)
+                for (int i = 0; i < renderer.sharedMaterials.Length; i++)
+                    renderer.SetPropertyBlock(null, i);
         }
 
         // ─── 对象池复用重置 ───
@@ -387,8 +415,7 @@ namespace FogHarbor.Enemy
             transform.position = new Vector3(spawnPosition.x, 0.1f, spawnPosition.z);
             transform.rotation = Quaternion.identity;
 
-            if (bodyRenderer != null)
-                bodyRenderer.material.color = originalColor;
+            RestoreBodyColor();
 
             if (controller != null)
                 controller.enabled = true;
@@ -404,13 +431,13 @@ namespace FogHarbor.Enemy
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
         }
 
-        private void ApplyGravity()
+        private float ApplyGravity()
         {
             if (controller.isGrounded && verticalVelocity < 0f)
                 verticalVelocity = -2f;
             else
                 verticalVelocity += Physics.gravity.y * Time.deltaTime;
-            controller.Move(Vector3.up * verticalVelocity * Time.deltaTime);
+            return verticalVelocity * Time.deltaTime;
         }
     }
 }

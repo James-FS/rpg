@@ -4,7 +4,8 @@ namespace FogHarbor.Player
 {
     /// <summary>
     /// 把玩家的实际运动状态映射到 Animator 参数：
-    /// ① speed：实际水平位移速度 → Idle/Walk/Run 混合树（0=Idle / 0.5=Walk / 1=Run）。
+    /// ① speed：实际水平位移速度 → Idle/Walk/Run 混合树（0=Idle / 0.5=Walk / 1=Run）；
+    ///    armed：PlayerWeaponVisual.IsDrawn → 在速度到 Run 档时切换空手跑与持剑跑。
     ///    用位置差计算而非 controller.velocity：PlayerController 每帧用重力 Move 覆盖 velocity，读 velocity 永远≈0。
     ///    只统计水平位移（忽略 Y），跳跃/重力垂直运动不会混入行走档位。
     ///    低于 0.3m/s 归零避免站立微抖；输出归一化 = rawSpeed / 5
@@ -17,8 +18,7 @@ namespace FogHarbor.Player
     ///    （定身时长由 PlayerController.gatherLockTime 控制，本类只管动画）。
     /// ④ draw / sheathe：订阅 OnDrawSwordStarted / OnSheatheSwordStarted → 播放拔刀 / 收刀动画
     ///    （模型在腰间与手上之间的切换由 PlayerWeaponVisual 处理）。
-    /// ⑤ attackOut / attackIn：订阅 OnAttackOutStarted / OnAttackInStarted → 播放两段斩击
-    ///    （连段顺序：外砍 → 内砍 交替，由 PlayerController 决定）。
+    /// ⑤ attack：订阅单次攻击事件 → 播放 SwordAttackSingle。
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     public class PlayerAnimatorDriver : MonoBehaviour
@@ -31,6 +31,7 @@ namespace FogHarbor.Player
 
         private Animator animator;
         private PlayerController player;
+        private PlayerWeaponVisual weaponVisual;
         private Vector3 lastPos;
         private bool hasLast;
         private float smoothedSpeed;
@@ -39,6 +40,7 @@ namespace FogHarbor.Player
         {
             animator = GetComponentInChildren<Animator>();
             player = GetComponent<PlayerController>();
+            weaponVisual = GetComponent<PlayerWeaponVisual>();
             if (animator == null)
                 Debug.LogWarning("[PlayerAnimatorDriver] 未找到 Animator，动画参数不会更新");
             if (player != null)
@@ -46,8 +48,7 @@ namespace FogHarbor.Player
                 player.OnGatherStarted += HandleGatherStarted;
                 player.OnDrawSwordStarted += HandleDrawSwordStarted;
                 player.OnSheatheSwordStarted += HandleSheatheSwordStarted;
-                player.OnAttackOutStarted += HandleAttackOutStarted;
-                player.OnAttackInStarted += HandleAttackInStarted;
+                player.OnAttackStarted += HandleAttackStarted;
             }
         }
 
@@ -58,8 +59,7 @@ namespace FogHarbor.Player
                 player.OnGatherStarted -= HandleGatherStarted;
                 player.OnDrawSwordStarted -= HandleDrawSwordStarted;
                 player.OnSheatheSwordStarted -= HandleSheatheSwordStarted;
-                player.OnAttackOutStarted -= HandleAttackOutStarted;
-                player.OnAttackInStarted -= HandleAttackInStarted;
+                player.OnAttackStarted -= HandleAttackStarted;
             }
         }
 
@@ -92,16 +92,14 @@ namespace FogHarbor.Player
                 animator.SetTrigger("sheathe");
         }
 
-        private void HandleAttackOutStarted()
+        private void HandleAttackStarted()
         {
             if (animator != null)
-                animator.SetTrigger("attackOut");
-        }
-
-        private void HandleAttackInStarted()
-        {
-            if (animator != null)
-                animator.SetTrigger("attackIn");
+            {
+                animator.SetBool("crouch", player != null && player.IsCrouching);
+                animator.SetBool("airborne", player != null && player.IsJumping);
+                animator.SetTrigger("attack");
+            }
         }
 
         private void Update()
@@ -122,9 +120,13 @@ namespace FogHarbor.Player
             float target = Mathf.Clamp01(speed / MaxSpeedForAnim);
             smoothedSpeed = Mathf.Lerp(smoothedSpeed, target, 1f - Mathf.Exp(-Time.deltaTime / speedSmoothTime));
             animator.SetFloat("speed", smoothedSpeed);
+            animator.SetFloat("armed", weaponVisual != null && weaponVisual.IsDrawn ? 1f : 0f);
 
             if (player != null)
+            {
                 animator.SetBool("airborne", player.IsJumping);
+                animator.SetBool("crouch", player.IsCrouching);
+            }
         }
     }
 }

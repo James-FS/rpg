@@ -55,7 +55,12 @@ namespace FogHarbor.Enemy
                 return;
 
             string clip = ClipIdle;
-            switch (wolf.CurrentState)
+            if (wolf.IsKnockedBack)
+            {
+                // 受击时打断咬击/跑步姿势，避免一边咬人一边向后滑。
+                clip = ClipIdle;
+            }
+            else switch (wolf.CurrentState)
             {
                 case EnemyWolf.WolfState.Patrol:
                     float speed = Time.deltaTime > 0f

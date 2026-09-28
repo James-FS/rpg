@@ -26,18 +26,30 @@ namespace FogHarbor.Dialogue
 
         private void Awake()
         {
-            questSystem = FindObjectOfType<QuestSystem>();
-            inventory = FindObjectOfType<InventorySystem>();
-            rewardService = FindObjectOfType<RewardService>();
-            relationshipSystem = FindObjectOfType<RelationshipSystem>();
-            if (questSystem == null) Debug.LogWarning("[GameContextProvider] 未找到 QuestSystem");
-            if (inventory == null) Debug.LogWarning("[GameContextProvider] 未找到 InventorySystem");
-            if (rewardService == null) Debug.LogWarning("[GameContextProvider] 未找到 RewardService");
-            if (relationshipSystem == null) Debug.LogWarning("[GameContextProvider] 未找到 RelationshipSystem");
+            ResolveSystems();
+        }
+
+        /// <summary>
+        /// Town/Forest 直接启动时 AppRoot 可能在当前场景对象 Awake 之后才创建。
+        /// 每次读取快照时补绑，避免 Awake 时的空引用被永久缓存。
+        /// </summary>
+        private void ResolveSystems()
+        {
+            if (questSystem == null) questSystem = FindObjectOfType<QuestSystem>();
+            if (inventory == null) inventory = FindObjectOfType<InventorySystem>();
+            if (rewardService == null) rewardService = FindObjectOfType<RewardService>();
+            if (relationshipSystem == null) relationshipSystem = FindObjectOfType<RelationshipSystem>();
         }
 
         /// <summary>剧情阶段由主任务状态推导，供 loreBlocks 的 unlockStage 门控与 Prompt「当前阶段」使用。</summary>
-        public int CurrentStage => ResolveStage();
+        public int CurrentStage
+        {
+            get
+            {
+                ResolveSystems();
+                return ResolveStage();
+            }
+        }
 
         private int ResolveStage()
         {
@@ -70,6 +82,7 @@ namespace FogHarbor.Dialogue
         {
             get
             {
+                ResolveSystems();
                 string mainQuestId = questSystem?.GetMainQuestId();
                 var quest = !string.IsNullOrEmpty(mainQuestId) ? questSystem.GetQuest(mainQuestId) : null;
                 string targetItemId = quest != null ? quest.TargetItemId : null;

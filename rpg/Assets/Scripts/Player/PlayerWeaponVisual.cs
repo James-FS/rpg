@@ -38,8 +38,8 @@ namespace FogHarbor.Player
         [SerializeField] private KeyCode drawKey = KeyCode.R;
         [Tooltip("拔刀：从该进度开始把模型从腰间平滑引导到手上（0~1；0.34 = 实测握把离挂点最近的时刻）")]
         [SerializeField] private float drawSwapProgress = 0.34f;
-        [Tooltip("收刀：把模型从手上平滑引导回腰间，到该进度刚好贴合（0~1；0.81 = 实测握把离挂点最近的时刻）")]
-        [SerializeField] private float sheatheSwapProgress = 0.81f;
+        [Tooltip("收刀：把模型从手上平滑引导回腰间，到该进度刚好贴合（0~1；0.78 = 新收剑动画中手到腰间的时刻）")]
+        [SerializeField] private float sheatheSwapProgress = 0.93f;
         [Tooltip("引导时长（归一化进度的比例）：在这段进度内连续插值位置+旋转，消除瞬间跳变（收刀时原为 16cm/120° 跳变）")]
         [SerializeField] private float swapBlendProgress = 0.2f;
 
@@ -49,6 +49,8 @@ namespace FogHarbor.Player
         private GameObject weaponInstance;
         private string currentItemId = "";
         private float bindDeadline;
+        private Coroutine guideRoutine;
+        private bool guiding;
 
         // 拔刀状态跨场景保留（换场景会换一个新的玩家对象，但"刀拔没拔出来"这件事不该被重置）
         private static bool drawnShared;
@@ -75,13 +77,48 @@ namespace FogHarbor.Player
             drawn = drawnShared;
             animator = GetComponentInChildren<Animator>();
             player = GetComponent<PlayerController>();
+            if (player != null)
+            {
+                player.OnAttackStarted += EnsureWeaponInHand;
+            }
             TryBind();
         }
 
         private void OnDisable()
         {
+            if (player != null)
+            {
+                player.OnAttackStarted -= EnsureWeaponInHand;
+            }
             UnbindEquipment();
             ClearWeapon();
+        }
+
+        /// <summary>攻击瞬间保证剑在手上（未拔刀则直接挂到 WeaponSocket，避免空手挥砍）。</summary>
+        public void EnsureWeaponInHand()
+        {
+            if (string.IsNullOrEmpty(currentItemId))
+                return;
+            // 收刀/拔刀引导中不要抢挂点，否则会出现「手一把、腰一把」或插值被打断
+            if (guiding)
+                return;
+            drawn = true;
+            drawnShared = true;
+            CleanupOrphanWeapons();
+            if (weaponInstance == null)
+            {
+                ShowWeapon(currentItemId, ResolveSocket());
+                return;
+            }
+            var socket = ResolveSocket();
+            if (socket == null)
+                return;
+            if (weaponInstance.transform.parent == socket)
+                return;
+            weaponInstance.transform.SetParent(socket, false);
+            weaponInstance.transform.localPosition = Vector3.zero;
+            weaponInstance.transform.localRotation = Quaternion.identity;
+            weaponInstance.transform.localScale = Vector3.one;
         }
 
         private void Update()
@@ -92,6 +129,28 @@ namespace FogHarbor.Player
             // 拔刀 / 收刀：面板打开时不响应（否则在对话框里打字会把 r 当成拔刀键）
             if (!GameInput.Blocked && Input.GetKeyDown(drawKey))
                 ToggleDraw();
+
+            // 攻击中若剑仍在腰间会穿模：强制挂到手上（收刀引导中除外）
+            if (animator != null && !guiding)
+            {
+                var st = animator.GetCurrentAnimatorStateInfo(0);
+                if (st.IsName("Attack") || st.IsName("CrouchAttack") || st.IsName("JumpAttack"))
+                    EnsureWeaponInHand();
+            }
+        }
+
+        /// <summary>清掉不在 weaponInstance 跟踪下的孤儿武器（手动生成/旧逻辑残留），避免双剑。</summary>
+        private void CleanupOrphanWeapons()
+        {
+            foreach (var t in GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t == transform)
+                    continue;
+                if (weaponInstance != null && t == weaponInstance.transform)
+                    continue;
+                if (t.name.StartsWith("Weapon_") && t.name != "WeaponSocket" && t.name != "Weapon.R" && t.name != "Weapon.R_end")
+                    Destroy(t.gameObject);
+            }
         }
 
         // ─── 拔刀 / 收刀 ───
@@ -102,11 +161,11 @@ namespace FogHarbor.Player
         {
             if (equipment == null || !equipment.HasWeapon)
                 return;
-            if (player != null && (player.IsBusy || player.IsJumping))
+            if (player != null && (player.IsBusy || player.IsJumping || player.IsCrouching))
                 return;
 
-            if (!drawn) StartCoroutine(DrawRoutine());
-            else StartCoroutine(SheatheRoutine());
+            if (!drawn) guideRoutine = StartCoroutine(DrawRoutine());
+            else guideRoutine = StartCoroutine(SheatheRoutine());
         }
 
         /// <summary>拔刀：播拔刀动画，握把到达腰间时开始把模型从腰间平滑引导到手上。</summary>
@@ -138,45 +197,50 @@ namespace FogHarbor.Player
         /// </summary>
         private IEnumerator GuideWeapon(string stateName, float startNorm, float endNorm, Transform fromSocket, Transform toSocket)
         {
-            float deadline = Time.time + 6f;
-
-            // 等动画进入目标状态
-            while (Time.time < deadline)
+            guiding = true;
+            try
             {
-                if (animator != null && animator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
-                    break;
-                yield return null;
-            }
+                float deadline = Time.time + 6f;
 
-            // 引导窗口：逐帧插值（动画提前结束也安全退出）
-            while (Time.time < deadline)
-            {
-                var st = animator != null ? animator.GetCurrentAnimatorStateInfo(0) : default;
-                if (animator == null || !st.IsName(stateName))
-                    break;
-
-                float n = st.normalizedTime;
-                if (n >= endNorm)
-                    break;
-
-                if (n >= startNorm && weaponInstance != null && fromSocket != null && toSocket != null)
+                while (Time.time < deadline)
                 {
-                    float k = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(startNorm, endNorm, n));
-                    var wt = weaponInstance.transform;
-                    wt.position = Vector3.Lerp(fromSocket.position, toSocket.position, k);
-                    wt.rotation = Quaternion.Slerp(fromSocket.rotation, toSocket.rotation, k);
+                    if (animator != null && animator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
+                        break;
+                    yield return null;
                 }
-                yield return null;
-            }
 
-            // 落位：挂到目标挂点（武器可能已被装备变化清掉，需判空）
-            if (weaponInstance != null && toSocket != null)
+                while (Time.time < deadline)
+                {
+                    var st = animator != null ? animator.GetCurrentAnimatorStateInfo(0) : default;
+                    if (animator == null || !st.IsName(stateName))
+                        break;
+
+                    float n = st.normalizedTime;
+                    if (n >= endNorm)
+                        break;
+
+                    if (n >= startNorm && weaponInstance != null && fromSocket != null && toSocket != null)
+                    {
+                        float k = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(startNorm, endNorm, n));
+                        var wt = weaponInstance.transform;
+                        wt.position = Vector3.Lerp(fromSocket.position, toSocket.position, k);
+                        wt.rotation = Quaternion.Slerp(fromSocket.rotation, toSocket.rotation, k);
+                    }
+                    yield return null;
+                }
+
+                if (weaponInstance != null && toSocket != null)
+                {
+                    var wt = weaponInstance.transform;
+                    wt.SetParent(toSocket, false);
+                    wt.localPosition = Vector3.zero;
+                    wt.localRotation = Quaternion.identity;
+                    wt.localScale = Vector3.one;
+                }
+            }
+            finally
             {
-                var wt = weaponInstance.transform;
-                wt.SetParent(toSocket, false);
-                wt.localPosition = Vector3.zero;
-                wt.localRotation = Quaternion.identity;
-                wt.localScale = Vector3.one;
+                guiding = false;
             }
         }
 
@@ -227,12 +291,14 @@ namespace FogHarbor.Player
             }
 
             ShowWeapon(currentItemId, drawn ? ResolveSocket() : ResolveStowSocket());
+            CleanupOrphanWeapons();
         }
 
         /// <summary>按 itemId 把武器模型挂到指定挂点；空 itemId / 没有配置手持模型时显示空手。</summary>
         private void ShowWeapon(string itemId, Transform socket)
         {
             ClearWeapon();
+            CleanupOrphanWeapons();
 
             if (string.IsNullOrEmpty(itemId) || socket == null)
                 return;
@@ -259,6 +325,7 @@ namespace FogHarbor.Player
             if (weaponInstance != null)
                 Destroy(weaponInstance);
             weaponInstance = null;
+            CleanupOrphanWeapons();
         }
 
         /// <summary>手部挂点（拔刀后持握）：优先用 Inspector 绑定，其次按名字查找。</summary>
