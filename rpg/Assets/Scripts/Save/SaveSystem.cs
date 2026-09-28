@@ -149,6 +149,12 @@ namespace FogHarbor.Save
         {
             if (!File.Exists(SavePath))
             {
+                if (File.Exists(BakPath))
+                {
+                    Debug.LogWarning("[SaveSystem] 主存档不存在，尝试从备份恢复");
+                    return LoadBackup();
+                }
+
                 Debug.Log("[SaveSystem] 无存档文件，将以新游戏启动");
                 return null;
             }
@@ -186,6 +192,12 @@ namespace FogHarbor.Save
             {
                 string json = File.ReadAllText(BakPath);
                 var data = JsonUtility.FromJson<SaveData>(json);
+                if (data == null || data.version != SAVE_VERSION)
+                {
+                    Debug.LogError("[SaveSystem] 备份版本不匹配或内容损坏");
+                    return null;
+                }
+
                 Debug.Log("[SaveSystem] 从备份加载成功");
                 return data;
             }

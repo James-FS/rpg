@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using FogHarbor.Items;
 using FogHarbor.Quest;
 using FogHarbor.Inventory;
 using FogHarbor.Equipment;
@@ -197,36 +196,36 @@ namespace FogHarbor.Session
             if (string.IsNullOrEmpty(itemId))
                 return QuestResult.Fail("缺少 itemId");
 
-            EquipmentSystem.EquipSlot slot;
-            if (equipmentSystem.WeaponId == itemId)
-                slot = EquipmentSystem.EquipSlot.Weapon;
-            else if (equipmentSystem.ArmorId == itemId)
-                slot = EquipmentSystem.EquipSlot.Armor;
-            else
+            if (!equipmentSystem.UnequipItem(itemId))
                 return QuestResult.Fail($"未装备 {itemId}，无法卸下");
-
-            if (!equipmentSystem.Unequip(slot))
-                return QuestResult.Fail($"卸下 {itemId} 失败");
 
             saveSystem.Save(player);
             return QuestResult.Ok($"已卸下 {itemId}");
         }
 
-        /// <summary>使用消耗品流程：校验物品定义（只读）→ 回血 → 扣减背包 → Save。</summary>
+        /// <summary>使用消耗品流程：由背包校验并消耗 → 应用物品效果 → Save。</summary>
         public QuestResult UseItem(string itemId)
         {
-            var data = ItemDatabase.GetById(itemId);
-            if (data == null)
-                return QuestResult.Fail($"未知物品: {itemId}");
-            if (data.Type != ItemType.Consumable)
-                return QuestResult.Fail($"{data.DisplayName} 不是可消耗物品");
-            if (!inventory.Has(itemId, 1))
-                return QuestResult.Fail($"背包中没有 {itemId}");
+            var result = inventory.TryConsumeConsumable(itemId, out var data);
+            switch (result)
+            {
+                case InventorySystem.ConsumeResult.InvalidItemId:
+                    return QuestResult.Fail("缺少 itemId");
+                case InventorySystem.ConsumeResult.UnknownItem:
+                    return QuestResult.Fail($"未知物品: {itemId}");
+                case InventorySystem.ConsumeResult.NotConsumable:
+                    return QuestResult.Fail($"{data.DisplayName} 不是可消耗物品");
+                case InventorySystem.ConsumeResult.NotOwned:
+                    return QuestResult.Fail($"背包中没有 {itemId}");
+                case InventorySystem.ConsumeResult.Success:
+                    break;
+                default:
+                    return QuestResult.Fail($"无法使用物品: {itemId}");
+            }
 
             if (player != null && data.HealAmount > 0)
                 player.Heal(data.HealAmount);
 
-            inventory.Remove(itemId, 1);
             saveSystem.Save(player);
             return QuestResult.Ok($"已使用 {data.DisplayName}");
         }

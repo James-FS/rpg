@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using FogHarbor.Items;
 
 namespace FogHarbor.Inventory
 {
@@ -11,6 +12,15 @@ namespace FogHarbor.Inventory
     /// </summary>
     public class InventorySystem : MonoBehaviour
     {
+        public enum ConsumeResult
+        {
+            Success,
+            InvalidItemId,
+            UnknownItem,
+            NotConsumable,
+            NotOwned
+        }
+
         private readonly Dictionary<string, int> items = new();
 
         /// <summary>背包发生变化时触发，UI 监听此事件刷新显示。</summary>
@@ -55,6 +65,20 @@ namespace FogHarbor.Inventory
             Debug.Log($"[Inventory] -{count} {itemId}");
             OnInventoryChanged?.Invoke();
             return true;
+        }
+
+        /// <summary>验证并消耗一件可使用的消耗品；物品类型和持有规则归背包系统管理。</summary>
+        public ConsumeResult TryConsumeConsumable(string itemId, out ItemData itemData)
+        {
+            itemData = null;
+            if (string.IsNullOrEmpty(itemId)) return ConsumeResult.InvalidItemId;
+
+            itemData = ItemDatabase.GetById(itemId);
+            if (itemData == null) return ConsumeResult.UnknownItem;
+            if (itemData.Type != ItemType.Consumable) return ConsumeResult.NotConsumable;
+            if (!Remove(itemId, 1)) return ConsumeResult.NotOwned;
+
+            return ConsumeResult.Success;
         }
 
         // ─── 存档支持 ───

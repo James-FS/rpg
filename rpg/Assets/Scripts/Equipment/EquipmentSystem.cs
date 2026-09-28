@@ -159,6 +159,15 @@ namespace FogHarbor.Equipment
             return true;
         }
 
+        /// <summary>按装备 ID 找到其所在槽位并脱下；槽位归属判断由装备系统负责。</summary>
+        public bool UnequipItem(string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId)) return false;
+            if (weaponId == itemId) return Unequip(EquipSlot.Weapon);
+            if (armorId == itemId) return Unequip(EquipSlot.Armor);
+            return false;
+        }
+
         // ─── 内部逻辑 ───
 
         private void RecalculateStats()

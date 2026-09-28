@@ -2,6 +2,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.UI;
 using FogHarbor.UI;
 
 namespace FogHarbor.EditorTools
@@ -18,6 +19,8 @@ namespace FogHarbor.EditorTools
         private const string PrefabPath = PrefabDir + "/GameUI.prefab";
         private const string BootScenePath = "Assets/Scenes/Boot.scene";
         private const string InstanceName = "GameUI";
+        private const string BackpackIconPath = "Assets/Resources/UI/Icons/icon_backpack.png";
+        private const string QuestIconPath = "Assets/Resources/UI/Icons/icon_quest.png";
 
         // 血条美术资源（Bloodlines UI 的 Rectangle 血条；包内滑条按 empty/full 同名版本成对使用，这里取 v4 一套）
         private const string HpBarEmptyPath =
@@ -56,6 +59,7 @@ namespace FogHarbor.EditorTools
                 LoadSubSprite(HpBarEmptyPath, HpBarEmptySpriteName),
                 LoadSubSprite(HpBarFullPath, HpBarFullSpriteName));
             BuildPanel<QuestTrackerPanel>("QuestTrackerPanel", canvas.transform).gameObject.SetActive(true);
+            BuildQuickMenu(canvas.transform);
             BuildPanel<InventoryPanel>("InventoryPanel", canvas.transform).gameObject.SetActive(false);
             BuildPanel<QuestPanel>("QuestPanel", canvas.transform).gameObject.SetActive(false);
             BuildPanel<DialoguePanel>("DialoguePanel", canvas.transform).gameObject.SetActive(false);
@@ -135,6 +139,46 @@ namespace FogHarbor.EditorTools
 
             Debug.LogWarning($"[GameUIPrefabBaker] 没找到子精灵 {spriteName}（{texturePath}），血条会退回纯色块");
             return null;
+        }
+
+        private static void BuildQuickMenu(Transform parent)
+        {
+            var menu = new GameObject("QuickMenu", typeof(RectTransform));
+            menu.transform.SetParent(parent, false);
+            var menuRT = menu.GetComponent<RectTransform>();
+            menuRT.anchorMin = Vector2.zero;
+            menuRT.anchorMax = Vector2.zero;
+            menuRT.pivot = Vector2.zero;
+            menuRT.anchoredPosition = new Vector2(24, 24);
+            menuRT.sizeDelta = new Vector2(160, 72);
+
+            CreateIconButton(menu.transform, "BackpackButton", BackpackIconPath, 0);
+            CreateIconButton(menu.transform, "QuestButton", QuestIconPath, 88);
+        }
+
+        private static void CreateIconButton(Transform parent, string name, string spritePath, float x)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.zero;
+            rt.pivot = Vector2.zero;
+            rt.anchoredPosition = new Vector2(x, 0);
+            rt.sizeDelta = new Vector2(72, 72);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = AssetDatabase.LoadAssetAtPath<Sprite>(spritePath);
+            image.preserveAspect = true;
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            var colors = button.colors;
+            colors.highlightedColor = new Color(1, 1, 1, 0.9f);
+            colors.pressedColor = new Color(1, 1, 1, 0.65f);
+            button.colors = colors;
+            var navigation = button.navigation;
+            navigation.mode = Navigation.Mode.None;
+            button.navigation = navigation;
         }
 
         private static T BuildPanel<T>(string name, Transform parent) where T : Component

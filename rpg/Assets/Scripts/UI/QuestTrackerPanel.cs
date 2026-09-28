@@ -25,6 +25,7 @@ namespace FogHarbor.UI
         private QuestSystem questSystem;
         private InventorySystem inventory;
         private SaveSystem saveSystem;
+        private bool refreshPending;
 
         private readonly List<string> trackedIds = new();
 
@@ -68,8 +69,8 @@ namespace FogHarbor.UI
             saveSystem = save;
 
             if (questSystem != null) questSystem.OnQuestStateChanged += OnQuestStateChanged;
-            if (inventory != null) inventory.OnInventoryChanged += Refresh;
-            if (saveSystem != null) saveSystem.OnLoadComplete += Refresh;
+            if (inventory != null) inventory.OnInventoryChanged += RequestRefresh;
+            if (saveSystem != null) saveSystem.OnLoadComplete += RequestRefresh;
 
             Refresh(); // 订阅后立即刷新初值（读档可能早于本面板创建）
         }
@@ -77,20 +78,31 @@ namespace FogHarbor.UI
         private void Unsubscribe()
         {
             if (questSystem != null) questSystem.OnQuestStateChanged -= OnQuestStateChanged;
-            if (inventory != null) inventory.OnInventoryChanged -= Refresh;
-            if (saveSystem != null) saveSystem.OnLoadComplete -= Refresh;
+            if (inventory != null) inventory.OnInventoryChanged -= RequestRefresh;
+            if (saveSystem != null) saveSystem.OnLoadComplete -= RequestRefresh;
         }
 
         private void OnDestroy() => Unsubscribe();
 
         /// <summary>任务状态变化（接取 / 完成 / 领奖）→ 重新组装列表。</summary>
-        private void OnQuestStateChanged(string questId, QuestState state) => Refresh();
+        private void OnQuestStateChanged(string questId, QuestState state) => RequestRefresh();
+
+        /// <summary>一次背包/领奖流程可能连续触发多个事件，同一帧只重建一次追踪文本。</summary>
+        private void RequestRefresh() => refreshPending = true;
+
+        private void LateUpdate()
+        {
+            if (!refreshPending) return;
+            refreshPending = false;
+            Refresh();
+        }
 
         // ─── 刷新 ───
 
         /// <summary>按当前任务状态与背包数量重建浮窗内容；没有可追踪任务时隐藏整块。</summary>
         public void Refresh()
         {
+            refreshPending = false;
             if (contentText == null || trackRoot == null) return;
 
             string rich = BuildContent();

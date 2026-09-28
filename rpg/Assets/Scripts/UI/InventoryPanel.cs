@@ -34,6 +34,7 @@ namespace FogHarbor.UI
         [SerializeField] private Button dropButton;
 
         private string selectedItemId;
+        private bool refreshPending;
 
         // ─── 布局（间距统一取 8 的倍数）───
         private const float PANEL_W  = 960f;   // 面板宽
@@ -107,15 +108,15 @@ namespace FogHarbor.UI
             this.inventory = inv;
             this.equipment = eq;
 
-            if (inventory != null) inventory.OnInventoryChanged += Refresh;
-            if (equipment != null) equipment.OnEquipmentChanged += Refresh;  // 装备变化也要刷新列表上的"已装备"标记
+            if (inventory != null) inventory.OnInventoryChanged += RequestRefresh;
+            if (equipment != null) equipment.OnEquipmentChanged += RequestRefresh;  // 装备变化也要刷新列表上的"已装备"标记
             Refresh();
         }
 
         private void OnDestroy()
         {
-            if (inventory != null) inventory.OnInventoryChanged -= Refresh;
-            if (equipment != null) equipment.OnEquipmentChanged -= Refresh;
+            if (inventory != null) inventory.OnInventoryChanged -= RequestRefresh;
+            if (equipment != null) equipment.OnEquipmentChanged -= RequestRefresh;
         }
 
         public void Show() { gameObject.SetActive(true); Refresh(); }
@@ -128,8 +129,19 @@ namespace FogHarbor.UI
 
         // ─── 刷新 ───
 
+        /// <summary>同一背包操作可能连续触发多个背包/装备事件，合并为一帧一次刷新。</summary>
+        private void RequestRefresh() => refreshPending = true;
+
+        private void LateUpdate()
+        {
+            if (!refreshPending || !gameObject.activeSelf) return;
+            refreshPending = false;
+            Refresh();
+        }
+
         private void Refresh()
         {
+            refreshPending = false;
             if (!gameObject.activeSelf || inventory == null) return;
 
             // 物品被用完/丢弃后清空选中（仍穿戴中的物品即使不在背包里也保留选中，便于卸下）

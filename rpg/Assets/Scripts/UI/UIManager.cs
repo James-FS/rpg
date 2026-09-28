@@ -71,6 +71,8 @@ namespace FogHarbor.UI
             questPanel = GetOrCreatePanel<QuestPanel>("QuestPanel", canvas);
             dialoguePanel = GetOrCreatePanel<DialoguePanel>("DialoguePanel", canvas);
 
+            BindQuickMenu(canvas);
+
             // 初始化（HUD 走事件订阅：HP/金币/任务状态变化时自动刷新）
             hudPanel.Initialize(player, questSystem);
             questTrackerPanel.Initialize(questSystem, inventory, saveSystem);
@@ -87,8 +89,8 @@ namespace FogHarbor.UI
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.B)) inventoryPanel.Toggle();
-            if (Input.GetKeyDown(KeyCode.Q)) questPanel.Toggle();
+            if (Input.GetKeyDown(KeyCode.B)) ToggleInventory();
+            if (Input.GetKeyDown(KeyCode.Q)) ToggleQuests();
             if (Input.GetKeyDown(KeyCode.Escape)) CloseAllPanels();
 
             SyncInputBlock();
@@ -148,6 +150,25 @@ namespace FogHarbor.UI
             SyncInputBlock();
         }
 
+        /// <summary>左下角按钮与快捷键共用的面板入口；同一时间只显示一个页面。</summary>
+        public void ToggleInventory()
+        {
+            if (inventoryPanel == null) return;
+            bool opening = !inventoryPanel.gameObject.activeSelf;
+            CloseAllPanels();
+            if (opening) inventoryPanel.Show();
+            SyncInputBlock();
+        }
+
+        public void ToggleQuests()
+        {
+            if (questPanel == null) return;
+            bool opening = !questPanel.gameObject.activeSelf;
+            CloseAllPanels();
+            if (opening) questPanel.Show();
+            SyncInputBlock();
+        }
+
         // ─── UI 意图转发（§6.1 差距 #1：面板不直调系统，由意图入口转发到 GameSession）───
 
         public void RequestEquip(string itemId)
@@ -179,10 +200,21 @@ namespace FogHarbor.UI
 
         private void CloseAllPanels()
         {
-            inventoryPanel.Hide();
-            questPanel.Hide();
-            dialoguePanel.Hide();
+            if (inventoryPanel != null && inventoryPanel.gameObject.activeSelf) inventoryPanel.Hide();
+            if (questPanel != null && questPanel.gameObject.activeSelf) questPanel.Hide();
+            if (dialoguePanel != null && dialoguePanel.gameObject.activeSelf) dialoguePanel.Hide();
             SyncInputBlock();
+        }
+
+        private void BindQuickMenu(Transform canvas)
+        {
+            var menu = canvas.Find("QuickMenu");
+            if (menu == null) return;
+
+            var backpack = menu.Find("BackpackButton")?.GetComponent<Button>();
+            var quest = menu.Find("QuestButton")?.GetComponent<Button>();
+            if (backpack != null) backpack.onClick.AddListener(ToggleInventory);
+            if (quest != null) quest.onClick.AddListener(ToggleQuests);
         }
 
         /// <summary>
