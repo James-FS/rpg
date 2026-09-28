@@ -10,6 +10,15 @@
 [Ll]og/
 crashlytics-build.properties
 
+# ---- ZCode 工作区配置（含本机 MCP 路径，仅保留本地）----
+.zcode/
+
+# ---- AI Agent 协作配置与技能文件（仅保留本地）----
+.mimocode/
+.agents/
+.codex/
+AGENTS.md
+
 # ---- IDE 及 Unity 自动生成的工程文件 ----
 *.csproj
 *.sln
@@ -48,6 +57,8 @@ rpg/screenshots/
 
 # ---- 原始美术源文件（已复制进 Unity 工程，仅保留本地）----
 /art/
+/animator-download/
+/art-source/
 
 # ---- 仅保留本地的策划/设计文档（方案、剧本、设计）----
 /混元模型-Blender处理流程.md
