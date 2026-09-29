@@ -68,6 +68,7 @@ namespace FogHarbor.Player
         private Vector3 jumpAttackPendingMotion;
         private bool jumpAttackActive;
         private int currentHp;
+        private Coroutine respawnRoutine;
 
         // 跳跃状态
         private float lastGroundedTime = -999f;
@@ -399,10 +400,10 @@ namespace FogHarbor.Player
             if (UIManager.Instance != null)
                 UIManager.Instance.ShowToast($"受到 {effectiveDamage} 点伤害");
 
-            if (currentHp <= 0)
+            if (currentHp <= 0 && respawnRoutine == null)
             {
                 Debug.Log("[PlayerController] 玩家死亡，重生回小镇");
-                StartCoroutine(RespawnRoutine());
+                respawnRoutine = StartCoroutine(RespawnRoutine());
             }
         }
 
@@ -411,13 +412,22 @@ namespace FogHarbor.Player
             if (UIManager.Instance != null)
                 UIManager.Instance.ShowToast("你被击败了…回到了小镇");
             yield return new WaitForSecondsRealtime(1.5f);
-            SceneManager.LoadScene("Town");
+            respawnRoutine = null;
+            if (currentHp <= 0) SceneManager.LoadScene("Town");
+        }
+
+        private void CancelPendingRespawn()
+        {
+            if (respawnRoutine == null) return;
+            StopCoroutine(respawnRoutine);
+            respawnRoutine = null;
         }
 
         /// <summary>外部调用：让玩家恢复生命值。</summary>
         public void Heal(int amount)
         {
             currentHp = Mathf.Min(maxHp, currentHp + amount);
+            if (currentHp > 0) CancelPendingRespawn();
             Debug.Log($"[PlayerController] 恢复 {amount} 点生命，当前 HP: {currentHp}");
             OnPlayerHpChanged?.Invoke(currentHp, maxHp);
         }
@@ -426,7 +436,14 @@ namespace FogHarbor.Player
         public void SetHp(int hp)
         {
             currentHp = Mathf.Clamp(hp, 0, maxHp);
+            if (currentHp > 0) CancelPendingRespawn();
             OnPlayerHpChanged?.Invoke(currentHp, maxHp);
+        }
+
+        public void RestoreHealth(int hp, int savedMaxHp)
+        {
+            maxHp = Mathf.Max(1, savedMaxHp);
+            SetHp(hp);
         }
     }
 }
