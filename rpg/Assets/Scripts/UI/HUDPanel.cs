@@ -164,7 +164,6 @@ namespace FogHarbor.UI
                 hpBarFill.type = Image.Type.Filled;
                 hpBarFill.fillMethod = Image.FillMethod.Horizontal;
                 hpBarFill.fillOrigin = (int)Image.OriginHorizontal.Left;
-                hpBarFill.fillAmount = 1f;
                 hpBarFill.color = Color.white;
             }
         }
