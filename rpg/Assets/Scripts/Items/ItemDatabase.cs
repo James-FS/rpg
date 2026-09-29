@@ -41,5 +41,6 @@ namespace FogHarbor.Items
         }
 
         public static bool Exists(string itemId) => lookup.ContainsKey(itemId);
+        public static IEnumerable<ItemData> GetAll() => lookup.Values;
     }
 }

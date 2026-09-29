@@ -40,6 +40,11 @@ namespace FogHarbor.UI
         private InventoryPanel inventoryPanel;
         private QuestPanel questPanel;
         private DialoguePanel dialoguePanel;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private FogHarbor.Debugging.GMPanel gmPanel;
+        private GameObject gmTestBadge;
+        private FogHarbor.Debugging.GMCommandService gmCommands;
+#endif
 
         private string currentPrompt = "";
 
@@ -82,6 +87,23 @@ namespace FogHarbor.UI
             inventoryPanel.Hide();
             questPanel.Hide();
             dialoguePanel.Hide();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var commands = GetComponent<FogHarbor.Debugging.GMCommandService>() ?? gameObject.AddComponent<FogHarbor.Debugging.GMCommandService>();
+            gmCommands = commands;
+            var diagnostics = GetComponent<FogHarbor.Debugging.GMDiagnostics>() ?? gameObject.AddComponent<FogHarbor.Debugging.GMDiagnostics>();
+            gmPanel = GetOrCreatePanel<FogHarbor.Debugging.GMPanel>("GMPanel", canvas);
+            gmPanel.Initialize(commands, diagnostics);
+            var badge = UIHelper.CreateImage("GMTestBadge", canvas, new Color(0.08f, 0.1f, 0.09f, 0.92f));
+            gmTestBadge = badge.gameObject;
+            badge.rectTransform.anchorMin = badge.rectTransform.anchorMax = new Vector2(0.5f, 1);
+            badge.rectTransform.pivot = new Vector2(0.5f, 1);
+            badge.rectTransform.anchoredPosition = new Vector2(0, -12);
+            badge.rectTransform.sizeDelta = new Vector2(230, 34);
+            badge.raycastTarget = false;
+            var badgeText = UIHelper.CreateText("Text", badge.transform, "GM · 测试存档", 18, new Color(0.48f, 0.85f, 0.68f), TextAlignmentOptions.Center);
+            UIHelper.Stretch(badgeText.rectTransform);
+            gmTestBadge.SetActive(false);
+#endif
             hudPanel.gameObject.SetActive(true);
 
             SyncInputBlock();   // 静态闸门跨场景保留，开场按实际面板状态复位
@@ -89,6 +111,27 @@ namespace FogHarbor.UI
 
         private void Update()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (gmTestBadge != null) gmTestBadge.SetActive(gmCommands != null && gmCommands.Testing);
+            if (Input.GetKeyDown(KeyCode.F2)) ToggleGM();
+            if (gmPanel != null && gmPanel.IsOpen)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    if (gmPanel.HasConfirmation) gmPanel.DismissConfirmation();
+                    else gmPanel.Hide();
+                }
+                SyncInputBlock();
+                return;
+            }
+#endif
+            if (EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null
+                && EventSystem.current.currentSelectedGameObject.GetComponent<TMP_InputField>() != null)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) CloseAllPanels();
+                SyncInputBlock();
+                return;
+            }
             if (Input.GetKeyDown(KeyCode.B)) ToggleInventory();
             if (Input.GetKeyDown(KeyCode.Q)) ToggleQuests();
             if (Input.GetKeyDown(KeyCode.Escape)) CloseAllPanels();
@@ -102,7 +145,22 @@ namespace FogHarbor.UI
         public bool IsModalPanelOpen =>
             (dialoguePanel != null && dialoguePanel.gameObject.activeSelf)
             || (inventoryPanel != null && inventoryPanel.gameObject.activeSelf)
-            || (questPanel != null && questPanel.gameObject.activeSelf);
+            || (questPanel != null && questPanel.gameObject.activeSelf)
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            || (gmPanel != null && gmPanel.IsOpen)
+#endif
+            ;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public void ToggleGM()
+        {
+            if (gmPanel == null) return;
+            bool opening = !gmPanel.IsOpen;
+            CloseAllPanels();
+            if (opening) gmPanel.Show();
+            SyncInputBlock();
+        }
+#endif
 
         /// <summary>把"面板是否打开"同步给世界输入闸门（每帧一行赋值，避免遗漏任何开关面板的路径）。</summary>
         private void SyncInputBlock()
@@ -200,6 +258,9 @@ namespace FogHarbor.UI
 
         private void CloseAllPanels()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (gmPanel != null) gmPanel.Hide();
+#endif
             if (inventoryPanel != null && inventoryPanel.gameObject.activeSelf) inventoryPanel.Hide();
             if (questPanel != null && questPanel.gameObject.activeSelf) questPanel.Hide();
             if (dialoguePanel != null && dialoguePanel.gameObject.activeSelf) dialoguePanel.Hide();

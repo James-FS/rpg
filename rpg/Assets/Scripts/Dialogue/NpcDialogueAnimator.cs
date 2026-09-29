@@ -35,20 +35,27 @@ namespace FogHarbor.Dialogue
 
         private void OnReply(StructuredReply reply)
         {
-            if (reply == null || animator == null)
-                return;
+            if (reply != null) PlayAction(reply.action);
+        }
+
+        public Animator Animator => animator;
+
+        public bool PlayAction(string action)
+        {
+            if (animator == null || !animator.isActiveAndEnabled) return false;
 
             int state;
-            switch (reply.action)
+            switch (action)
             {
                 case "wave": state = Wave; break;
                 case "nod": state = Nod; break;
                 case "bow": state = Bow; break;
                 case "idle": state = Idle; break;
-                default: return;
+                default: return false;
             }
-
+            if (!animator.HasState(0, state)) return false;
             animator.CrossFadeInFixedTime(state, 0.15f, 0, 0f);
+            return true;
         }
     }
 }

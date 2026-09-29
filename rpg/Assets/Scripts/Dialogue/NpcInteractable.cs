@@ -36,9 +36,13 @@ namespace FogHarbor.Dialogue
 
         public void Interact()
         {
-            if (agent == null)
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var gm = FindObjectOfType<FogHarbor.Debugging.GMCommandService>();
+            if (gm != null && !gm.EnsureNpcTestIdentity(agent)) return;
+#endif
+            if (agent == null || !agent.isActiveAndEnabled)
             {
-                Debug.LogWarning($"[NpcInteractable] {gameObject.name} 上未找到 NpcAgent，无法对话");
+                Debug.LogWarning($"[NpcInteractable] {gameObject.name} 的 NpcAgent 不存在或未启用，无法对话");
                 return;
             }
 

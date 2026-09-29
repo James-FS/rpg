@@ -19,15 +19,19 @@ namespace FogHarbor.Save
     /// </summary>
     public class SaveSystem : MonoBehaviour
     {
-        private const string SAVE_FILE = "fog_harbor_save.json";
-        private const string TMP_FILE  = "fog_harbor_save.tmp";
-        private const string BAK_FILE  = "fog_harbor_save.bak";
         private const int SAVE_VERSION = 1;
 
         private static string SaveDir => Application.persistentDataPath;
-        private static string SavePath => Path.Combine(SaveDir, SAVE_FILE);
-        private static string TmpPath  => Path.Combine(SaveDir, TMP_FILE);
-        private static string BakPath  => Path.Combine(SaveDir, BAK_FILE);
+        private string slotName = "fog_harbor_save";
+        private string SavePath => Path.Combine(SaveDir, slotName + ".json");
+        private string TmpPath => Path.Combine(SaveDir, slotName + ".tmp");
+        private string BakPath => Path.Combine(SaveDir, slotName + ".bak");
+        public bool LastSaveSucceeded { get; private set; } = true;
+        public string CurrentSlot => slotName;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public bool IsTestSlot => slotName == "fog_harbor_gm_test";
+        public void SelectTestSlot(bool testing) => slotName = testing ? "fog_harbor_gm_test" : "fog_harbor_save";
+#endif
 
         // 外部引用
         private InventorySystem inventory;
@@ -84,6 +88,12 @@ namespace FogHarbor.Save
         /// <summary>保存游戏状态到磁盘。</summary>
         public bool Save(PlayerController player = null)
         {
+            return WriteSnapshot(Capture(player));
+        }
+
+        public SaveData Capture(PlayerController player = null)
+        {
+            if (player == null) player = FindObjectOfType<PlayerController>();
             var data = new SaveData
             {
                 gold = rewardService.GetSaveGold(),
@@ -105,8 +115,14 @@ namespace FogHarbor.Save
                 });
             }
 
+            return data;
+        }
+
+        private bool WriteSnapshot(SaveData data)
+        {
             try
             {
+                Directory.CreateDirectory(SaveDir);
                 string json = JsonUtility.ToJson(data, true);
 
                 // 1. 写入临时文件
@@ -116,27 +132,21 @@ namespace FogHarbor.Save
                 JsonUtility.FromJson<SaveData>(json);
 
                 // 3. 如果旧存档存在，备份为 .bak
-                if (File.Exists(SavePath))
-                {
-                    if (File.Exists(BakPath))
-                        File.Delete(BakPath);
-                    File.Move(SavePath, BakPath);
-                }
-
-                // 4. 临时文件替换为正式存档
-                File.Move(TmpPath, SavePath);
+                if (File.Exists(SavePath)) File.Replace(TmpPath, SavePath, BakPath);
+                else File.Move(TmpPath, SavePath);
 
                 Debug.Log($"[SaveSystem] 存档已保存: {SavePath}");
                 OnSaveComplete?.Invoke();
+                LastSaveSucceeded = true;
                 return true;
             }
             catch (Exception e)
             {
+                LastSaveSucceeded = false;
                 Debug.LogError($"[SaveSystem] 存档失败: {e.Message}");
 
                 // 清理临时文件
-                if (File.Exists(TmpPath))
-                    File.Delete(TmpPath);
+                try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch (IOException) { }
 
                 return false;
             }
@@ -164,7 +174,7 @@ namespace FogHarbor.Save
                 string json = File.ReadAllText(SavePath);
                 var data = JsonUtility.FromJson<SaveData>(json);
 
-                if (data == null || data.version != SAVE_VERSION)
+                if (!Validate(data))
                 {
                     Debug.LogWarning("[SaveSystem] 存档版本不匹配或损坏，尝试加载备份");
                     return LoadBackup();
@@ -192,7 +202,7 @@ namespace FogHarbor.Save
             {
                 string json = File.ReadAllText(BakPath);
                 var data = JsonUtility.FromJson<SaveData>(json);
-                if (data == null || data.version != SAVE_VERSION)
+                if (!Validate(data))
                 {
                     Debug.LogError("[SaveSystem] 备份版本不匹配或内容损坏");
                     return null;
@@ -219,6 +229,13 @@ namespace FogHarbor.Save
                 return false;
             }
 
+            return Apply(data, player);
+        }
+
+        public bool Apply(SaveData data, PlayerController player = null)
+        {
+            if (!Validate(data)) return false;
+            if (player == null) player = FindObjectOfType<PlayerController>();
             // 恢复金币
             rewardService.LoadGold(data.gold);
 
@@ -246,7 +263,7 @@ namespace FogHarbor.Save
             // 恢复玩家 HP
             if (player != null)
             {
-                player.SetHp(data.hp);
+                player.RestoreHealth(data.hp, data.maxHp);
                 Debug.Log($"[SaveSystem] 玩家 HP 已恢复: {data.hp}/{data.maxHp}");
             }
 
@@ -254,6 +271,45 @@ namespace FogHarbor.Save
             OnLoadComplete?.Invoke();
             return true;
         }
+
+        public static bool Validate(SaveData data)
+        {
+            if (data == null || data.version != SAVE_VERSION || data.gold < 0
+                || data.maxHp <= 0 || data.hp < 0 || data.hp > data.maxHp
+                || data.inventory == null || data.quests == null) return false;
+            foreach (var entry in data.quests)
+                if (entry == null || string.IsNullOrEmpty(entry.questId)
+                    || !Enum.TryParse<QuestState>(entry.state, out var state)
+                    || !Enum.IsDefined(typeof(QuestState), state)) return false;
+            foreach (var entry in data.inventory)
+                if (entry == null || string.IsNullOrEmpty(entry.itemId) || entry.count < 0) return false;
+            // Older version-1 saves predate relationships; null restores initial NPC favor.
+            if (data.relationships != null)
+                foreach (var entry in data.relationships)
+                    if (entry == null || string.IsNullOrEmpty(entry.npcId) || entry.favor < 0) return false;
+            return true;
+        }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public void WriteDebugSnapshot(string name, SaveData data)
+        {
+            if (name != "checkpoint" && name != "before_test") throw new ArgumentException("Invalid snapshot name");
+            if (!Validate(data)) throw new InvalidDataException("Invalid save snapshot");
+            string path = Path.Combine(SaveDir, "fog_harbor_gm_" + name + ".json");
+            Directory.CreateDirectory(SaveDir);
+            File.WriteAllText(path + ".tmp", JsonUtility.ToJson(data, true));
+            if (File.Exists(path)) File.Replace(path + ".tmp", path, path + ".bak");
+            else File.Move(path + ".tmp", path);
+        }
+
+        public SaveData ReadDebugSnapshot(string name)
+        {
+            if (name != "checkpoint" && name != "before_test") throw new ArgumentException("Invalid snapshot name");
+            var data = JsonUtility.FromJson<SaveData>(File.ReadAllText(Path.Combine(SaveDir, "fog_harbor_gm_" + name + ".json")));
+            if (!Validate(data)) throw new InvalidDataException("Invalid save snapshot");
+            return data;
+        }
+#endif
 
         // ─── 存档检查 ───
 

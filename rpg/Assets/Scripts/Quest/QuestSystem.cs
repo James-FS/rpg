@@ -177,6 +177,15 @@ namespace FogHarbor.Quest
             OnQuestStateChanged?.Invoke(questId, newState);
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public bool DebugReset(string questId)
+        {
+            if (!questDefs.ContainsKey(questId)) return false;
+            SetState(questId, QuestState.Available);
+            return true;
+        }
+#endif
+
         // ─── 存档支持 ───
 
         public Dictionary<string, QuestState> GetSaveData()
@@ -209,6 +218,7 @@ namespace FogHarbor.Quest
             }
 
             Debug.Log($"[QuestSystem] 从存档恢复 {questStates.Count} 个任务状态");
+            foreach (var pair in questStates) OnQuestStateChanged?.Invoke(pair.Key, pair.Value);
         }
     }
 }

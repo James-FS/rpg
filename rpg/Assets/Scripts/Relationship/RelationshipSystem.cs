@@ -101,6 +101,7 @@ namespace FogHarbor.Relationship
                 }
             }
             Debug.Log($"[Relationship] 从存档恢复 {favors.Count} 个 NPC 好感");
+            foreach (var profile in profiles.Values) OnFavorChanged?.Invoke(profile.NpcId, GetFavor(profile.NpcId));
         }
     }
 
