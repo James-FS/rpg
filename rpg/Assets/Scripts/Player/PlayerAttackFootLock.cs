@@ -4,6 +4,7 @@ namespace FogHarbor.Player
 {
     /// <summary>Keeps both feet planted while the sword attack twists through the hips and torso.</summary>
     [RequireComponent(typeof(Animator))]
+    [DisallowMultipleComponent]
     public sealed class PlayerAttackFootLock : MonoBehaviour
     {
         private static readonly int AttackState = Animator.StringToHash("Base Layer.Attack");
@@ -42,8 +43,9 @@ namespace FogHarbor.Player
             {
                 leftPosition = leftFoot.position;
                 rightPosition = rightFoot.position;
-                leftRotation = leftFoot.rotation;
-                rightRotation = rightFoot.rotation;
+                // IK goal rotations are not the raw foot-bone rotations.
+                leftRotation = animator.GetIKRotation(AvatarIKGoal.LeftFoot);
+                rightRotation = animator.GetIKRotation(AvatarIKGoal.RightFoot);
                 locked = true;
             }
 

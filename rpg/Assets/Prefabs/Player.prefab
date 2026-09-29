@@ -80,8 +80,6 @@ GameObject:
   - component: {fileID: 2217666206399155752}
   - component: {fileID: 2775378153924592623}
   - component: {fileID: 6719068757660288750}
-  - component: {fileID: 7804894192611655693}
-  - component: {fileID: 8904087901316571308}
   m_Layer: 0
   m_HasEditorInfo: 1
   m_Name: Player
@@ -209,34 +207,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speedSmoothTime: 0.1
---- !u!114 &7804894192611655693
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2855210583607384383}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 05d9ae4dde754e7409c3c2e1832174db, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  standFootY: -1
-  tolerance: 0.02
---- !u!114 &8904087901316571308
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2855210583607384383}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 05d9ae4dde754e7409c3c2e1832174db, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  standFootY: -1
-  tolerance: 0.02
 --- !u!1 &3288451344176017639
 GameObject:
   m_ObjectHideFlags: 0
