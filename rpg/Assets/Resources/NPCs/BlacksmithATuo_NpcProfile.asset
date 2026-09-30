@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:yousandi.cn,2023:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 419a3748225694f4290344ee80665188, type: 3}
+  m_Name: BlacksmithATuo_NpcProfile
+  m_EditorClassIdentifier: 
+  npcId: blacksmith_atuo
+  displayName: "\u94C1\u5320\u963F\u62D3"
+  portrait: {fileID: 21300000, guid: f4489d53501525d42bc6f51d3768a7a7, type: 3}
+  initialFavor: 0
+  choices:
+  - choiceId: polite
+    favorDelta: 1
+    replyHint: "\u963F\u62D3\u54FC\u4E86\u4E00\u58F0\uFF0C\u624B\u4E0A\u7684\u9524\u5B50\u6CA1\u505C\uFF0C\u4F46\u4E5F\u6CA1\u8D76\u4F60\u8D70\u3002"
+  - choiceId: care_child
+    favorDelta: 2
+    replyHint: "\u63D0\u5230\u963F\u8424\u7684\u75C5\uFF0C\u963F\u62D3\u7684\u9524\u5B50\u505C\u4E86\u534A\u62CD\uFF0C\u773C\u795E\u8F6F\u4E86\u4E0B\u6765\u3002"
+  - choiceId: rude
+    favorDelta: -2
+    replyHint: "\u963F\u62D3\u76B1\u7709\u77AA\u4E86\u4F60\u4E00\u773C\uFF1A\u6CA1\u4E8B\u522B\u6775\u5728\u8FD9\u513F\u3002"

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -9,6 +10,41 @@ namespace FogHarbor.UI
     /// </summary>
     public static class UIHelper
     {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void InitializeFontAtlases()
+        {
+            var visited = new HashSet<TMP_FontAsset>();
+            PrepareFontAtlas(TMP_Settings.defaultFontAsset, visited);
+            if (TMP_Settings.fallbackFontAssets == null) return;
+            foreach (var font in TMP_Settings.fallbackFontAssets)
+                PrepareFontAtlas(font, visited);
+        }
+
+        public static void PrepareFontAtlases(TMP_FontAsset font)
+        {
+            PrepareFontAtlas(font, new HashSet<TMP_FontAsset>());
+        }
+
+        private static void PrepareFontAtlas(TMP_FontAsset font, HashSet<TMP_FontAsset> visited)
+        {
+            if (font == null || !visited.Add(font)) return;
+
+            var atlases = font.atlasTextures;
+            if (atlases == null || atlases.Length == 0 || atlases[0] == null)
+            {
+                Debug.LogWarning($"[UIHelper] Font atlas missing: {font.name}", font);
+            }
+            else
+            {
+                // TMP 3.0.9 uses this lazy cache directly when expanding a persistent font's atlas.
+                _ = font.atlasTexture;
+            }
+
+            if (font.fallbackFontAssetTable == null) return;
+            foreach (var fallback in font.fallbackFontAssetTable)
+                PrepareFontAtlas(fallback, visited);
+        }
+
         public static GameObject CreateObject(string name, Transform parent)
         {
             var go = new GameObject(name, typeof(RectTransform));
@@ -39,6 +75,7 @@ namespace FogHarbor.UI
         {
             var go = CreateObject(name, parent);
             var tmp = go.AddComponent<TextMeshProUGUI>();
+            PrepareFontAtlases(tmp.font);
             tmp.text = text;
             tmp.fontSize = fontSize;
             tmp.color = color;

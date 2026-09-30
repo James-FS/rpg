@@ -117,6 +117,8 @@ namespace FogHarbor.UI
             gameObject.SetActive(true);
 
             npcNameText.text = npcName ?? "NPC";
+            // 输入框占位跟随当前 NPC 名字（原硬编码"对林洛说点什么..."）
+            (inputField.placeholder as TextMeshProUGUI).text = "对" + (npcName ?? "NPC") + "说点什么...";
             ClearMessages();
             inputField.text = "";
             SetStatus(StatusKind.Idle);

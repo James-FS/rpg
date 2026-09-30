@@ -170,7 +170,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: aa77d07ce7c3c294f8e68435e3666033, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  detectRadius: 2
+  detectRadius: 3
   interactableMask:
     serializedVersion: 2
     m_Bits: 4294967295
