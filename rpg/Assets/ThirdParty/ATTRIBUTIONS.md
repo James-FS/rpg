@@ -25,13 +25,14 @@
 
 ## Mixamo（Adobe）· 角色模型
 
-- **用途**：玩家角色 `Character_Rigged`（2026-09-12 替换）、NPC 药师林洛 `herbalist_mixamo`（2026-09-13 替换）
+- **用途**：玩家角色 `Character_Rigged`（2026-09-12 替换）、NPC 药师林洛 `herbalist_mixamo`（2026-09-13 替换）、巡逻小怪 `PatrolGuard`（2026-10-06 导入，Mixamo Guard_03）
 - **来源**：Adobe Mixamo（`mixamorig` 骨骼命名）
 - **授权**：Mixamo 素材（按 Adobe Mixamo 条款，可免费用于项目）
 - **本地路径**：
   - 玩家：`Assets/Art/Characters/Player/`（`Character_Rigged.fbx` + 贴图 + `Animations/`（Idle/Walk/Run/Gather））
   - 林洛：`Assets/Art/Characters/herbalist/`（`herbalist_mixamo.fbx` + `herbalist_basecolor.png` + `herbalist_body.mat`）
-- **备注**：两个模型均按 Humanoid 导入（自动生成 Avatar）；林洛使用 `NpcLinIdle.controller`（复用玩家 Idle 剪辑，经 Humanoid 重定向）；玩家预制体当前使用 `PlayerIdle.controller`。比例基准：玩家高 2.70m；林洛 2.45m（比玩家略矮、体型偏瘦）。
+  - 巡逻小怪：`Assets/Art/Characters/PatrolGuard/`（`PatrolGuard.fbx` + 3 张贴图 + `Materials/PatrolGuard_Mat.mat` + `PatrolGuard.prefab`）
+- **备注**：三个模型均按 Humanoid 导入（自动生成 Avatar）；林洛使用 `NpcLinIdle.controller`（复用玩家 Idle 剪辑，经 Humanoid 重定向）；玩家预制体当前使用 `PlayerIdle.controller`。比例基准：玩家高 2.70m；林洛 2.45m（比玩家略矮、体型偏瘦）；巡逻小怪 2.70m（与玩家等高，缩放 1.239）。巡逻小怪原始文件 `art/character/巡逻小怪.fbx` 的 3 张贴图原嵌于 FBX 内部，已抽出为独立 PNG；其内嵌 mixamo 动画仅 0.03s（空壳），动画需复用工程内 Humanoid 剪辑。
 
 ## Quaternius · Zombie Apocalypse Kit（德国牧羊犬/狼）
 
@@ -62,6 +63,15 @@
 - **本地路径**：`Assets/ThirdParty/Free Viking Pack/`
 - **导入日期**：2026-09-08
 - **备注**：2026-09-13 清理后仅保留 A_BaseB（模型 / 预制体）与在用材质。授权以原始分发渠道为准（包内未附 LICENSE 文件）。
+
+## Tencent xLua
+
+- **用途**：Lua 运行时与 C#/Lua 互调（后续用于独立 LuaLab 练习场）
+- **来源**：https://github.com/Tencent/xLua
+- **版本**：v2.1.16，Lua 5.3 原生插件包
+- **授权**：MIT，许可证见 `Assets/XLua/LICENSE.TXT`
+- **本地路径**：`Assets/XLua/`、`Assets/Plugins/`
+- **备注**：当前先面向 Windows x64 团结编辑器接入验证；其他平台需单独验证原生插件与 AOT/代码生成配置。
 
 ---
 
