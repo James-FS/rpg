@@ -18,6 +18,10 @@ MonoBehaviour:
   isMainQuest: 0
   targetItemId: iron_ore
   targetCount: 3
+  acceptanceItem: {fileID: 11400000, guid: f0cf3411db0195c4da392bee187039d8, type: 2}
+  acceptanceItemCount: 1
   rewardGold: 30
   rewardItemId: iron_sword
   rewardItemCount: 1
+  rewardNpcId: blacksmith_atuo
+  rewardFavor: 3

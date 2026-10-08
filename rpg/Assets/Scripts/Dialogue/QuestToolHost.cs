@@ -27,7 +27,7 @@ namespace FogHarbor.Dialogue
             // Server 模式不需要本地 data/ 来加载 NPC 配置；但保留兼容路径，
             // 切回 Local 模式仍可用（避免写死路径又不丢功能）。
             if (string.IsNullOrEmpty(DevConfigStore.DataRootOverride)
-                && string.IsNullOrEmpty(DevConfigStore.FindDataRoot()))
+                && !HasDiscoverableDataRoot())
             {
                 // 当前开发环境实际的 AIBot 数据目录；发布时改为拷贝 data/ 到 StreamingAssets/aibot
                 if (DevConfigStore.SetDataRoot(@"D:/Code/aibot/data"))
@@ -39,6 +39,18 @@ namespace FogHarbor.Dialogue
                     Debug.LogError("[QuestToolHost] AIBot 数据根目录无效，请在游戏启动配置中设置可移植路径");
                 }
             }
+        }
+
+        // FindDataRoot logs a warning when it finds nothing. Check the same standard
+        // candidates quietly so the expected development fallback can be applied
+        // without emitting a transient warning during NPC initialization.
+        private static bool HasDiscoverableDataRoot()
+        {
+            string assets = Application.dataPath;
+            return System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "data"))
+                || System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "..", "data"))
+                || System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "..", "..", "data"))
+                || System.IO.Directory.Exists(System.IO.Path.Combine(Application.streamingAssetsPath, "aibot"));
         }
 
         /// <summary>把全部任务工具注册到 NpcAgent（在 Chat 之前调用）。

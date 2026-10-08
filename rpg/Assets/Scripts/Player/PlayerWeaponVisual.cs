@@ -68,6 +68,10 @@ namespace FogHarbor.Player
 
         /// <summary>是否处于拔刀（手持）状态；false = 收在腰间。</summary>
         public bool IsDrawn => drawn;
+        public bool CanAttack => !string.IsNullOrEmpty(currentItemId) && !guiding
+            && (drawn || IsMiningTool);
+        public bool IsMiningTool => !string.IsNullOrEmpty(currentItemId)
+            && ItemDatabase.GetById(currentItemId)?.IsMiningTool == true;
 
         private void OnEnable()
         {
@@ -80,6 +84,7 @@ namespace FogHarbor.Player
             if (player != null)
             {
                 player.OnAttackStarted += EnsureWeaponInHand;
+                player.OnPlayerHpChanged += HandleHpChanged;
             }
             TryBind();
         }
@@ -89,15 +94,16 @@ namespace FogHarbor.Player
             if (player != null)
             {
                 player.OnAttackStarted -= EnsureWeaponInHand;
+                player.OnPlayerHpChanged -= HandleHpChanged;
             }
             UnbindEquipment();
             ClearWeapon();
         }
 
-        /// <summary>攻击瞬间保证剑在手上（未拔刀则直接挂到 WeaponSocket，避免空手挥砍）。</summary>
+        /// <summary>保持已拔出的武器在手上；攻击事件不能代替 R 拔刀。</summary>
         public void EnsureWeaponInHand()
         {
-            if (string.IsNullOrEmpty(currentItemId))
+            if (string.IsNullOrEmpty(currentItemId) || (!drawn && !IsMiningTool))
                 return;
             // 收刀/拔刀引导中不要抢挂点，否则会出现「手一把、腰一把」或插值被打断
             if (guiding)
@@ -116,9 +122,19 @@ namespace FogHarbor.Player
             if (weaponInstance.transform.parent == socket)
                 return;
             weaponInstance.transform.SetParent(socket, false);
-            weaponInstance.transform.localPosition = Vector3.zero;
-            weaponInstance.transform.localRotation = Quaternion.identity;
-            weaponInstance.transform.localScale = Vector3.one;
+            ApplyWeaponPose(weaponInstance.transform);
+        }
+
+        private void HandleHpChanged(int hp, int maxHp)
+        {
+            if (hp > 0) return;
+            if (guideRoutine != null)
+            {
+                StopCoroutine(guideRoutine);
+                guideRoutine = null;
+            }
+            guiding = false;
+            EnsureWeaponInHand();
         }
 
         private void Update()
@@ -134,7 +150,7 @@ namespace FogHarbor.Player
             if (animator != null && !guiding)
             {
                 var st = animator.GetCurrentAnimatorStateInfo(0);
-                if (st.IsName("Attack") || st.IsName("CrouchAttack") || st.IsName("JumpAttack"))
+                if (st.IsName("Attack") || st.IsName("CrouchAttack") || st.IsName("JumpAttack") || st.IsName("MiningAttack"))
                     EnsureWeaponInHand();
             }
         }
@@ -159,7 +175,7 @@ namespace FogHarbor.Player
         /// 未装备武器、动作中（采集/攻击/拔收刀）或腾空时不响应。</summary>
         public void ToggleDraw()
         {
-            if (equipment == null || !equipment.HasWeapon)
+            if (guiding || equipment == null || !equipment.HasWeapon || IsMiningTool)
                 return;
             if (player != null && (player.IsBusy || player.IsJumping || player.IsCrouching))
                 return;
@@ -233,9 +249,7 @@ namespace FogHarbor.Player
                 {
                     var wt = weaponInstance.transform;
                     wt.SetParent(toSocket, false);
-                    wt.localPosition = Vector3.zero;
-                    wt.localRotation = Quaternion.identity;
-                    wt.localScale = Vector3.one;
+                    ApplyWeaponPose(wt);
                 }
             }
             finally
@@ -272,6 +286,15 @@ namespace FogHarbor.Player
             string newId = equipment != null ? equipment.WeaponId : "";
             if (newId != currentItemId)
             {
+                if (guideRoutine != null) StopCoroutine(guideRoutine);
+                guideRoutine = null;
+                guiding = false;
+                player?.OnAttackAnimationExit();
+                if (animator != null)
+                {
+                    foreach (string trigger in new[] { "attack", "draw", "sheathe" }) animator.ResetTrigger(trigger);
+                    if (player == null || !player.IsDead) animator.CrossFadeInFixedTime("Base Layer.Move", 0.08f, 0);
+                }
                 drawn = false;
                 drawnShared = false;
             }
@@ -287,9 +310,12 @@ namespace FogHarbor.Player
             if (string.IsNullOrEmpty(currentItemId))
             {
                 ClearWeapon();
+                if (animator != null) animator.SetBool("miningTool", false);
                 return;
             }
 
+            if (IsMiningTool) drawn = drawnShared = true;
+            if (animator != null) animator.SetBool("miningTool", IsMiningTool);
             ShowWeapon(currentItemId, drawn ? ResolveSocket() : ResolveStowSocket());
             CleanupOrphanWeapons();
         }
@@ -315,9 +341,15 @@ namespace FogHarbor.Player
 
             weaponInstance = Instantiate(data.HoldPrefab, socket, false);
             weaponInstance.name = "Weapon_" + itemId;
-            weaponInstance.transform.localPosition = Vector3.zero;
-            weaponInstance.transform.localRotation = Quaternion.identity;
-            weaponInstance.transform.localScale = Vector3.one;
+            ApplyWeaponPose(weaponInstance.transform);
+        }
+
+        private void ApplyWeaponPose(Transform weapon)
+        {
+            var data = ItemDatabase.GetById(currentItemId);
+            weapon.localPosition = data != null ? data.HoldLocalPosition : Vector3.zero;
+            weapon.localRotation = data != null ? Quaternion.Euler(data.HoldLocalEulerAngles) : Quaternion.identity;
+            weapon.localScale = Vector3.one;
         }
 
         private void ClearWeapon()
@@ -367,3 +399,4 @@ namespace FogHarbor.Player
         }
     }
 }
+

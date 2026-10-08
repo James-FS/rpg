@@ -14,14 +14,28 @@ namespace FogHarbor.Player
         [SerializeField] private float detectRadius = 2f;
         [SerializeField] private LayerMask interactableMask = ~0;
 
+        private PlayerController player;
         private IInteractable nearestInteractable;
         private readonly List<IInteractable> targets = new List<IInteractable>();
 
         /// <summary>当前最近可交互对象的提示文本。</summary>
         public string CurrentPrompt { get; private set; }
 
+        private void Awake()
+        {
+            player = GetComponent<PlayerController>();
+        }
+
         private void Update()
         {
+            if (player != null && player.IsDead)
+            {
+                nearestInteractable = null;
+                CurrentPrompt = "";
+                if (UIManager.Instance != null) UIManager.Instance.SetPrompt("");
+                return;
+            }
+
             DetectInteractables();
 
             // 面板打开时屏蔽交互键与提示（否则在对话框里按 E 会重复触发交互/重开对话）

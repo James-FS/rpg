@@ -19,6 +19,10 @@ namespace FogHarbor.Bootstrap
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoInit()
         {
+            // Title owns its own UI and starts Boot only when the player launches a journey.
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == TitleMenu.SceneName)
+                return;
+
             // 当前场景已有 AppRoot（如从 Boot.scene 启动），直接使用
             if (GameObject.Find("AppRoot") != null)
                 return;

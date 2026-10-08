@@ -14,6 +14,8 @@ namespace FogHarbor.World
         [SerializeField] private string targetSceneName;
         [SerializeField] private string promptText = "按 E 进入";
 
+        public string TargetSceneName => targetSceneName;
+
         public string GetPrompt() => promptText;
 
         public void Interact()
@@ -21,7 +23,8 @@ namespace FogHarbor.World
             if (!string.IsNullOrEmpty(targetSceneName))
             {
                 Debug.Log($"[SceneGate] 切换到场景: {targetSceneName}");
-                SceneManager.LoadScene(targetSceneName);
+                var session = FindObjectOfType<FogHarbor.Session.GameSession>();
+                if (session != null) session.ChangeScene(targetSceneName);
             }
             else
             {
@@ -30,3 +33,4 @@ namespace FogHarbor.World
         }
     }
 }
+

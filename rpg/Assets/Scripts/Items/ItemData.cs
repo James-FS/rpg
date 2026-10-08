@@ -35,6 +35,16 @@ namespace FogHarbor.Items
         [Tooltip("装备后握在手里的模型（Prefab）；留空表示该物品没有手持外观")]
         [SerializeField] private GameObject holdPrefab;
 
+        [Tooltip("手持模型根节点相对挂点的位置")]
+        [SerializeField] private Vector3 holdLocalPosition;
+        [Tooltip("手持模型根节点相对挂点的欧拉旋转")]
+        [SerializeField] private Vector3 holdLocalEulerAngles;
+
+        [Header("武器动作")]
+        [SerializeField] private bool isMiningTool;
+        [Tooltip("首次进入游戏时发放一次，并记录到存档")]
+        [SerializeField] private bool starterItem;
+
         [Header("标记")]
         [SerializeField] private bool isQuestItem;
 
@@ -46,6 +56,10 @@ namespace FogHarbor.Items
         public int Defense => defense;
         public int HealAmount => healAmount;
         public GameObject HoldPrefab => holdPrefab;
+        public Vector3 HoldLocalPosition => holdLocalPosition;
+        public Vector3 HoldLocalEulerAngles => holdLocalEulerAngles;
         public bool IsQuestItem => isQuestItem;
+        public bool IsMiningTool => isMiningTool;
+        public bool StarterItem => starterItem;
     }
 }

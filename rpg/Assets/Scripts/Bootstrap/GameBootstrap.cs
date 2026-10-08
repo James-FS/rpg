@@ -32,8 +32,12 @@ namespace FogHarbor.Bootstrap
             // Boot 场景启动后自动加载第一个游戏场景
             if (SceneManager.GetActiveScene().name == "Boot")
             {
-                SceneManager.LoadScene(firstSceneName);
+                // 直接从 Boot 进 Play 时没有标题幕层，补一层遮住同步加载的黑屏
+                if (FogHarbor.UI.LoadingVeil.Active == null) FogHarbor.UI.LoadingVeil.Show(null);
+                var saves = GetComponent<FogHarbor.Save.SaveSystem>();
+                SceneManager.LoadScene(saves != null ? saves.GetResumeScene(firstSceneName) : firstSceneName);
             }
         }
     }
 }
+

@@ -40,6 +40,7 @@ namespace FogHarbor.UI
         private InventoryPanel inventoryPanel;
         private QuestPanel questPanel;
         private DialoguePanel dialoguePanel;
+        private DeathPanel deathPanel;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private FogHarbor.Debugging.GMPanel gmPanel;
         private GameObject gmTestBadge;
@@ -69,12 +70,18 @@ namespace FogHarbor.UI
 
             // 面板挂载点：场景实例 → Prefab → 代码创建
             var canvas = ResolveCanvas();
+            var saveStatus = new GameObject("SaveStatus", typeof(RectTransform), typeof(SaveStatusIndicator));
+            saveStatus.transform.SetParent(canvas, false);
+            saveStatus.GetComponent<SaveStatusIndicator>().Initialize(saveSystem);
 
             hudPanel = GetOrCreatePanel<HUDPanel>("HUD", canvas);
             questTrackerPanel = GetOrCreatePanel<QuestTrackerPanel>("QuestTrackerPanel", canvas);
             inventoryPanel = GetOrCreatePanel<InventoryPanel>("InventoryPanel", canvas);
             questPanel = GetOrCreatePanel<QuestPanel>("QuestPanel", canvas);
             dialoguePanel = GetOrCreatePanel<DialoguePanel>("DialoguePanel", canvas);
+            deathPanel = GetOrCreatePanel<DeathPanel>("DeathPanel", canvas);
+            deathPanel.Initialize(RequestRevive);
+            deathPanel.Hide();
 
             BindQuickMenu(canvas);
 
@@ -106,11 +113,17 @@ namespace FogHarbor.UI
 #endif
             hudPanel.gameObject.SetActive(true);
 
+            HandlePlayerHpChanged(player != null ? player.CurrentHp : 1, player != null ? player.MaxHp : 1);
             SyncInputBlock();   // 静态闸门跨场景保留，开场按实际面板状态复位
         }
 
         private void Update()
         {
+            if (player != null && player.IsDead)
+            {
+                SyncInputBlock();
+                return;
+            }
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (gmTestBadge != null) gmTestBadge.SetActive(gmCommands != null && gmCommands.Testing);
             if (Input.GetKeyDown(KeyCode.F2)) ToggleGM();
@@ -143,7 +156,9 @@ namespace FogHarbor.UI
 
         /// <summary>是否有模态面板打开（对话框 / 背包 / 任务）。打开时屏蔽世界输入，见 GameInput。</summary>
         public bool IsModalPanelOpen =>
-            (dialoguePanel != null && dialoguePanel.gameObject.activeSelf)
+            (player != null && player.IsDead)
+            || (deathPanel != null && deathPanel.IsOpen)
+            || (dialoguePanel != null && dialoguePanel.gameObject.activeSelf)
             || (inventoryPanel != null && inventoryPanel.gameObject.activeSelf)
             || (questPanel != null && questPanel.gameObject.activeSelf)
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -154,6 +169,7 @@ namespace FogHarbor.UI
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         public void ToggleGM()
         {
+            if (player != null && player.IsDead) return;
             if (gmPanel == null) return;
             bool opening = !gmPanel.IsOpen;
             CloseAllPanels();
@@ -165,7 +181,7 @@ namespace FogHarbor.UI
         /// <summary>把"面板是否打开"同步给世界输入闸门（每帧一行赋值，避免遗漏任何开关面板的路径）。</summary>
         private void SyncInputBlock()
         {
-            GameInput.Blocked = IsModalPanelOpen;
+            GameInput.Blocked = IsModalPanelOpen || (gameSession != null && gameSession.IsTransitioning);
         }
 
         private void OnEnable() => SceneManager.sceneLoaded += OnSceneLoaded;
@@ -175,6 +191,7 @@ namespace FogHarbor.UI
         {
             FindPlayer();
             hudPanel?.SetPlayer(player);
+            HandlePlayerHpChanged(player != null ? player.CurrentHp : 1, player != null ? player.MaxHp : 1);
         }
 
         // ─── 公开方法 ───
@@ -193,8 +210,14 @@ namespace FogHarbor.UI
                 hudPanel.ShowToast(message);
         }
 
+        public void HideForTravel()
+        {
+            CloseAllPanels();
+        }
+
         public void ShowDialogue(string npcName, AIBot.Unity.NpcAgent agent)
         {
+            if (player != null && player.IsDead) return;
             CloseAllPanels();
             dialoguePanel.Show(npcName, agent);
             SyncInputBlock();
@@ -203,6 +226,7 @@ namespace FogHarbor.UI
         /// <summary>仅显示对话面板骨架（无 agent 绑定，调试用）。</summary>
         public void ShowDialogueSkeleton(string npcName)
         {
+            if (player != null && player.IsDead) return;
             CloseAllPanels();
             dialoguePanel.ShowSkeleton(npcName);
             SyncInputBlock();
@@ -211,6 +235,7 @@ namespace FogHarbor.UI
         /// <summary>左下角按钮与快捷键共用的面板入口；同一时间只显示一个页面。</summary>
         public void ToggleInventory()
         {
+            if (player != null && player.IsDead) return;
             if (inventoryPanel == null) return;
             bool opening = !inventoryPanel.gameObject.activeSelf;
             CloseAllPanels();
@@ -220,6 +245,7 @@ namespace FogHarbor.UI
 
         public void ToggleQuests()
         {
+            if (player != null && player.IsDead) return;
             if (questPanel == null) return;
             bool opening = !questPanel.gameObject.activeSelf;
             CloseAllPanels();
@@ -253,7 +279,52 @@ namespace FogHarbor.UI
 
         private void FindPlayer()
         {
+            UnbindPlayer();
             player = FindObjectOfType<PlayerController>();
+            if (player != null)
+            {
+                player.OnPlayerHpChanged += HandlePlayerHpChanged;
+                player.OnReviveReady += HandleReviveReady;
+            }
+        }
+
+        private void UnbindPlayer()
+        {
+            if (player == null) return;
+            player.OnPlayerHpChanged -= HandlePlayerHpChanged;
+            player.OnReviveReady -= HandleReviveReady;
+        }
+
+        private void OnDestroy()
+        {
+            UnbindPlayer();
+            if (Instance == this) Instance = null;
+        }
+
+        private void HandlePlayerHpChanged(int hp, int maxHp)
+        {
+            if (deathPanel == null) return;
+            if (hp <= 0)
+            {
+                CloseAllPanels();
+                SetPrompt("");
+                deathPanel.Show(player != null && player.CanRevive);
+            }
+            else deathPanel.Hide();
+            SyncInputBlock();
+        }
+
+        private void HandleReviveReady()
+        {
+            if (deathPanel != null && player != null && player.IsDead)
+                deathPanel.SetReady(player.CanRevive);
+        }
+
+        /// <summary>Death panel forwards its revive intent through the UI manager.</summary>
+        public void RequestRevive()
+        {
+            if (player == null || !player.IsDead || !player.CanRevive) return;
+            player.RequestRevive();
         }
 
         private void CloseAllPanels()
@@ -347,3 +418,4 @@ namespace FogHarbor.UI
         }
     }
 }
+

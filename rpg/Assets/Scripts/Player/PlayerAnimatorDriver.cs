@@ -19,12 +19,28 @@ namespace FogHarbor.Player
     /// ④ draw / sheathe：订阅 OnDrawSwordStarted / OnSheatheSwordStarted → 播放拔刀 / 收刀动画
     ///    （模型在腰间与手上之间的切换由 PlayerWeaponVisual 处理）。
     /// ⑤ attack：订阅单次攻击事件 → 播放 SwordAttackSingle。
+    /// ⑥ dead：HP 归零立即打断当前动作，播放单次 SwordDeath；恢复 HP 时退出死亡。
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     public class PlayerAnimatorDriver : MonoBehaviour
     {
         private const float MaxSpeedForAnim = 5f;
         private const float DeadZone = 0.3f;
+        private const string DeathClipName = "SwordDeath";
+        private bool wasDead;
+
+        /// <summary>Full death clip plus a short hold before returning to Town.</summary>
+        public float DeathDuration
+        {
+            get
+            {
+                if (animator != null && animator.runtimeAnimatorController != null)
+                    foreach (var clip in animator.runtimeAnimatorController.animationClips)
+                        if (clip.name == DeathClipName)
+                            return clip.length / Mathf.Max(0.01f, animator.speed) + 0.2f;
+                return 1.5f;
+            }
+        }
 
         [Tooltip("速度参数平滑时间常数（秒）：滤掉逐帧测速的帧率抖动，避免动画在待机/走/跑之间闪切")]
         [SerializeField] private float speedSmoothTime = 0.1f;
@@ -49,6 +65,8 @@ namespace FogHarbor.Player
                 player.OnDrawSwordStarted += HandleDrawSwordStarted;
                 player.OnSheatheSwordStarted += HandleSheatheSwordStarted;
                 player.OnAttackStarted += HandleAttackStarted;
+                player.OnPlayerHpChanged += HandleHpChanged;
+                HandleHpChanged(player.CurrentHp, player.MaxHp);
             }
         }
 
@@ -60,6 +78,7 @@ namespace FogHarbor.Player
                 player.OnDrawSwordStarted -= HandleDrawSwordStarted;
                 player.OnSheatheSwordStarted -= HandleSheatheSwordStarted;
                 player.OnAttackStarted -= HandleAttackStarted;
+                player.OnPlayerHpChanged -= HandleHpChanged;
             }
         }
 
@@ -96,16 +115,40 @@ namespace FogHarbor.Player
         {
             if (animator != null)
             {
+                animator.SetBool("miningTool", weaponVisual != null && weaponVisual.IsMiningTool);
                 animator.SetBool("crouch", player != null && player.IsCrouching);
                 animator.SetBool("airborne", player != null && player.IsJumping);
                 animator.SetTrigger("attack");
             }
         }
 
+        private void HandleHpChanged(int hp, int maxHp)
+        {
+            if (animator == null) return;
+            bool dead = hp <= 0;
+            animator.SetBool("dead", dead);
+            if (dead == wasDead) return;
+            wasDead = dead;
+            foreach (string trigger in new[] { "attack", "gather", "draw", "sheathe" })
+                animator.ResetTrigger(trigger);
+            smoothedSpeed = 0f;
+            animator.SetFloat("speed", 0f);
+            // Override even an in-flight attack transition; death always has priority.
+            animator.CrossFadeInFixedTime(dead ? "Base Layer.Death" : "Base Layer.Move", 0.08f, 0);
+            lastPos = transform.position;
+        }
+
         private void Update()
         {
             if (animator == null || !hasLast)
                 return;
+
+            if (player != null && player.IsDead)
+            {
+                lastPos = transform.position;
+                animator.SetFloat("speed", 0f);
+                return;
+            }
 
             Vector3 delta = transform.position - lastPos;
             lastPos = transform.position;
@@ -120,7 +163,7 @@ namespace FogHarbor.Player
             float target = Mathf.Clamp01(speed / MaxSpeedForAnim);
             smoothedSpeed = Mathf.Lerp(smoothedSpeed, target, 1f - Mathf.Exp(-Time.deltaTime / speedSmoothTime));
             animator.SetFloat("speed", smoothedSpeed);
-            animator.SetFloat("armed", weaponVisual != null && weaponVisual.IsDrawn ? 1f : 0f);
+            animator.SetFloat("armed", weaponVisual != null && weaponVisual.IsDrawn && !weaponVisual.IsMiningTool ? 1f : 0f);
 
             if (player != null)
             {

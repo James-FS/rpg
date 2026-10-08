@@ -88,6 +88,21 @@ namespace FogHarbor.Quest
             return true;
         }
 
+        /// <summary>Preflight supplies before advancing the quest state.</summary>
+        public bool CanGrantQuestSupplies(QuestData def)
+        {
+            return def != null && (def.AcceptanceItem == null ||
+                (inventory != null && def.AcceptanceItemCount > 0 &&
+                 !string.IsNullOrEmpty(def.AcceptanceItem.ItemId)));
+        }
+
+        /// <summary>Called only after the quest successfully changes to Accepted.</summary>
+        public void GrantQuestSupplies(QuestData def)
+        {
+            if (def.AcceptanceItem != null)
+                inventory.Add(def.AcceptanceItem.ItemId, def.AcceptanceItemCount);
+        }
+
         // ─── 存档支持 ───
 
         public int GetSaveGold()
