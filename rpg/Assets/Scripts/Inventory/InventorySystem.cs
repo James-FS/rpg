@@ -22,6 +22,7 @@ namespace FogHarbor.Inventory
         }
 
         private readonly Dictionary<string, int> items = new();
+        private readonly HashSet<string> starterItemGrants = new();
 
         /// <summary>背包发生变化时触发，UI 监听此事件刷新显示。</summary>
         public event Action OnInventoryChanged;
@@ -79,6 +80,30 @@ namespace FogHarbor.Inventory
             if (!Remove(itemId, 1)) return ConsumeResult.NotOwned;
 
             return ConsumeResult.Success;
+        }
+
+        /// <summary>Grant newly introduced starter items once, including older saves.</summary>
+        public bool EnsureStarterItems(string equippedWeapon, string equippedArmor)
+        {
+            bool changed = false;
+            foreach (var item in ItemDatabase.GetAll())
+            {
+                if (!item.StarterItem || !starterItemGrants.Add(item.ItemId)) continue;
+                changed = true;
+                if (!Has(item.ItemId) && equippedWeapon != item.ItemId && equippedArmor != item.ItemId)
+                    Add(item.ItemId, 1);
+            }
+            return changed;
+        }
+
+        public List<string> GetStarterItemGrants() => new List<string>(starterItemGrants);
+
+        public void LoadStarterItemGrants(List<string> grants)
+        {
+            starterItemGrants.Clear();
+            if (grants != null)
+                foreach (string id in grants)
+                    if (!string.IsNullOrEmpty(id)) starterItemGrants.Add(id);
         }
 
         // ─── 存档支持 ───

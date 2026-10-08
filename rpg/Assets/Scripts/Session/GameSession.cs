@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 using UnityEngine.SceneManagement;
 using FogHarbor.Quest;
 using FogHarbor.Inventory;
@@ -44,6 +45,12 @@ namespace FogHarbor.Session
 
         private PlayerController player;
         private bool saveLoadedOnce;
+        private bool transitioning;
+        private bool arrivalPending;
+        private string arrivalTargetScene;
+        private string arrivalOriginScene;
+        public bool IsTransitioning => transitioning;
+        public bool IsReadyToSave => saveLoadedOnce && !transitioning && player != null;
 
         private void Awake()
         {
@@ -73,6 +80,13 @@ namespace FogHarbor.Session
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             TryBindAndLoad();
+            // 传送落点必须在 sceneLoaded（激活即触发）处理：LoadSceneAsync 完成回调可能滞后数秒，
+            // 若在协程续跑里落点，玩家会先暴露在默认出生点。
+            if (arrivalPending && scene.name == arrivalTargetScene)
+            {
+                arrivalPending = false;
+                if (player != null) PlaceAtArrivalGate(player, arrivalOriginScene);
+            }
         }
 
         /// <summary>场景加载后绑定玩家（PlayerController 在场景物体上，AppRoot 在 DontDestroyOnLoad），
@@ -87,6 +101,8 @@ namespace FogHarbor.Session
                 saveLoadedOnce = true;
                 if (saveSystem != null)
                     saveSystem.LoadAndApply(player);
+                if (inventory.EnsureStarterItems(equipmentSystem.WeaponId, equipmentSystem.ArmorId))
+                    saveSystem?.Save(player);
             }
         }
 
@@ -94,6 +110,54 @@ namespace FogHarbor.Session
         public void SetPlayer(PlayerController pc)
         {
             player = pc;
+        }
+
+        /// <summary>Save departure, load the target, carry health, then save the arrival.</summary>
+        public bool ChangeScene(string target, bool revive = false)
+        {
+            if (transitioning || !IsReadyToSave || !SaveSystem.IsGameplayScene(target)
+                || !Application.CanStreamedLevelBeLoaded(target)) return false;
+            if (!saveSystem.Save(player)) return false;
+            transitioning = true;
+            int hp = revive ? player.MaxHp : player.CurrentHp;
+            int maxHp = player.MaxHp;
+            arrivalPending = !revive;
+            arrivalTargetScene = target;
+            arrivalOriginScene = SceneManager.GetActiveScene().name;
+            StartCoroutine(Travel(target, hp, maxHp));
+            return true;
+        }
+
+        private IEnumerator Travel(string target, int hp, int maxHp)
+        {
+            FogHarbor.UI.UIManager.Instance?.HideForTravel();
+            yield return SceneManager.LoadSceneAsync(target);
+            player = FindObjectOfType<PlayerController>();
+            if (player != null)
+            {
+                player.RestoreHealth(hp, maxHp);
+                saveSystem.Save(player);
+            }
+            transitioning = false;
+        }
+
+        /// <summary>落到目标场景中指回出发场景的那扇门口；门 Prefab 约定 forward 朝向场景内部，
+        /// 因此落在门前一格并面朝场景，避免站在门的碰撞体上。复活仍走默认出生点。</summary>
+        private void PlaceAtArrivalGate(PlayerController player, string originScene)
+        {
+            foreach (var gate in Object.FindObjectsOfType<FogHarbor.World.SceneGate>())
+            {
+                if (gate.TargetSceneName != originScene) continue;
+                Transform t = gate.transform;
+                Vector3 forward = t.forward;
+                forward.y = 0f;
+                forward = forward.sqrMagnitude > 0.001f ? forward.normalized : Vector3.forward;
+                // 必须经 RestorePose（禁用 CharacterController 再传送），直接设 transform 会被物理弹回原点
+                player.RestorePose(t.position + forward * 1.2f + Vector3.up * 0.1f,
+                    Quaternion.LookRotation(forward).eulerAngles.y);
+                return;
+            }
+            Debug.LogWarning($"[GameSession] 场景 {originScene} 中未找到入口门，玩家停留在默认出生点");
         }
 
         // ─── 用例：完成任务并领奖（主线终点，唯一入口）───
@@ -127,13 +191,33 @@ namespace FogHarbor.Session
                 return QuestResult.Fail("领奖状态推进失败（请勿重复尝试）");
             }
 
+            int favorGained = 0;
+            if (!string.IsNullOrEmpty(def.RewardNpcId) && def.RewardFavor != 0)
+            {
+                relationshipSystem.AddFavor(def.RewardNpcId, def.RewardFavor);
+                favorGained = def.RewardFavor;
+            }
+
             saveSystem.Save(player);
-            return QuestResult.Ok(BuildCompletionMessage(def));
+            return QuestResult.Ok(BuildCompletionMessage(def, favorGained));
         }
 
         // ─── 用例：接受任务（唯一入口）───
 
         /// <summary>接受任务流程：QuestSystem 校验并推进 → Save。</summary>
+        public QuestResult DeliverQuest(string questId)
+        {
+            if (string.IsNullOrEmpty(questId) || questSystem.GetQuest(questId) == null)
+                return QuestResult.Fail("委托不存在。");
+            if (questSystem.GetState(questId) == QuestState.Accepted)
+            {
+                if (!questSystem.CanComplete(questId))
+                    return QuestResult.Fail("还没有收集齐委托需要的物品。");
+                questSystem.Complete(questId);
+            }
+            return CompleteQuest(questId);
+        }
+
         public QuestResult AcceptQuest(string questId)
         {
             if (string.IsNullOrEmpty(questId))
@@ -143,15 +227,21 @@ namespace FogHarbor.Session
             if (def == null)
                 return QuestResult.Fail($"任务不存在: {questId}");
 
+            if (!rewardService.CanGrantQuestSupplies(def))
+                return QuestResult.Fail("任务物资配置无效或背包未就绪，暂时无法接受委托。");
+
             if (!questSystem.Accept(questId))
             {
                 return QuestResult.Fail(
                     $"任务 {questId} 当前状态为 {questSystem.GetState(questId)}，无法接受");
             }
 
+            rewardService.GrantQuestSupplies(def);
             saveSystem.Save(player);
+            string supplies = def.AcceptanceItem != null
+                ? $" 获得{def.AcceptanceItem.DisplayName} ×{def.AcceptanceItemCount}（已放入背包）。" : "";
             return QuestResult.Ok(
-                $"玩家已接受任务「{def.Title}」。目标：{def.TargetItemId} x{def.TargetCount}。");
+                $"玩家已接受任务「{def.Title}」。目标：{def.TargetItemId} x{def.TargetCount}。{supplies}");
         }
 
         // ─── 用例：拾取物品并推进任务（唯一入口）───
@@ -243,12 +333,19 @@ namespace FogHarbor.Session
             return QuestResult.Ok($"已丢弃 {itemId}");
         }
 
-        private static string BuildCompletionMessage(QuestData def)
+        private string BuildCompletionMessage(QuestData def, int favorGained)
         {
             string rewardDesc = $"{def.RewardGold} 金币";
             if (!string.IsNullOrEmpty(def.RewardItemId))
                 rewardDesc += $"、{def.RewardItemId} x{def.RewardItemCount}";
-            return $"任务「{def.Title}」完成！已扣除任务物品，发放奖励：{rewardDesc}。";
+            string favorDesc = string.Empty;
+            if (favorGained != 0)
+            {
+                string npcName = relationshipSystem.GetProfile(def.RewardNpcId)?.DisplayName ?? def.RewardNpcId;
+                string verb = favorGained > 0 ? "提升" : "下降";
+                favorDesc = $"{npcName} 对你的好感{verb}了 {Mathf.Abs(favorGained)} 点。";
+            }
+            return $"任务「{def.Title}」完成！已扣除任务物品，发放奖励：{rewardDesc}。{favorDesc}";
         }
 
         // ─── 用例：提交金币/背包只读查询（供 AI 只读工具使用）───
@@ -298,3 +395,6 @@ namespace FogHarbor.Session
         }
     }
 }
+
+
+

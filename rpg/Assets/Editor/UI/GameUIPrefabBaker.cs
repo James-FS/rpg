@@ -63,6 +63,7 @@ namespace FogHarbor.EditorTools
             BuildPanel<InventoryPanel>("InventoryPanel", canvas.transform).gameObject.SetActive(false);
             BuildPanel<QuestPanel>("QuestPanel", canvas.transform).gameObject.SetActive(false);
             BuildPanel<DialoguePanel>("DialoguePanel", canvas.transform).gameObject.SetActive(false);
+            BuildPanel<DeathPanel>("DeathPanel", canvas.transform).gameObject.SetActive(false);
 
             // 3) 保存（覆盖同名预制体）
             Directory.CreateDirectory(PrefabDir);
@@ -197,6 +198,7 @@ namespace FogHarbor.EditorTools
                 case InventoryPanel inventory: inventory.EnsureUI(); break;
                 case QuestPanel quest: quest.EnsureUI(); break;
                 case DialoguePanel dialogue: dialogue.EnsureUI(); break;
+                case DeathPanel death: death.EnsureUI(); break;
             }
             return panel;
         }

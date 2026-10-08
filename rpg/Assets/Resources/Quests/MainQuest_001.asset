@@ -18,6 +18,10 @@ MonoBehaviour:
   isMainQuest: 1
   targetItemId: moon_herb
   targetCount: 1
+  acceptanceItem: {fileID: 11400000, guid: 2f7f2072dff11964c9ca5e376864f56f, type: 2}
+  acceptanceItemCount: 1
   rewardGold: 50
   rewardItemId: healing_potion
   rewardItemCount: 1
+  rewardNpcId: herbalist_lin
+  rewardFavor: 5

@@ -69,9 +69,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   itemId: iron_ore
-  count: 1
+  count: 2
   promptText: "\u6309 E \u62FE\u53D6"
   destroyOnPickup: 1
+  requiredMiningHits: 3
 --- !u!1 &864280410711191451
 GameObject:
   m_ObjectHideFlags: 0

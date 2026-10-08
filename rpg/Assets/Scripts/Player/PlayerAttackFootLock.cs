@@ -2,17 +2,20 @@ using UnityEngine;
 
 namespace FogHarbor.Player
 {
-    /// <summary>Keeps both feet planted while the sword attack twists through the hips and torso.</summary>
+    /// <summary>Keeps attack feet planted and stabilizes the head during mining swings.</summary>
     [RequireComponent(typeof(Animator))]
     [DisallowMultipleComponent]
     public sealed class PlayerAttackFootLock : MonoBehaviour
     {
         private static readonly int AttackState = Animator.StringToHash("Base Layer.Attack");
         private static readonly int CrouchAttackState = Animator.StringToHash("Base Layer.CrouchAttack");
+        private static readonly int MiningAttackState = Animator.StringToHash("Base Layer.MiningAttack");
 
         private Animator animator;
         private Transform leftFoot;
         private Transform rightFoot;
+        private Transform head;
+        private Quaternion miningHeadRotation;
         private bool locked;
         private Vector3 leftPosition;
         private Vector3 rightPosition;
@@ -24,6 +27,8 @@ namespace FogHarbor.Player
             animator = GetComponent<Animator>();
             leftFoot = animator.GetBoneTransform(HumanBodyBones.LeftFoot);
             rightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
+            head = animator.GetBoneTransform(HumanBodyBones.Head);
+            if (head != null) miningHeadRotation = Quaternion.Inverse(transform.rotation) * head.rotation;
         }
 
         private void OnAnimatorIK(int layerIndex)
@@ -32,7 +37,7 @@ namespace FogHarbor.Player
                 return;
 
             int stateHash = animator.GetCurrentAnimatorStateInfo(0).fullPathHash;
-            bool attacking = stateHash == AttackState || stateHash == CrouchAttackState;
+            bool attacking = stateHash == AttackState || stateHash == CrouchAttackState || stateHash == MiningAttackState;
             if (!attacking)
             {
                 locked = false;
@@ -53,6 +58,18 @@ namespace FogHarbor.Player
             LockFoot(AvatarIKGoal.RightFoot, rightPosition, rightRotation);
         }
 
+        private void LateUpdate()
+        {
+            if (head == null || animator == null) return;
+            bool mining = animator.GetCurrentAnimatorStateInfo(0).fullPathHash == MiningAttackState
+                || (animator.IsInTransition(0) && animator.GetNextAnimatorStateInfo(0).fullPathHash == MiningAttackState);
+            // Humanoid retargeting can reintroduce torso rotation into an otherwise fixed head.
+            if (mining)
+                head.rotation = transform.rotation * miningHeadRotation;
+            else
+                miningHeadRotation = Quaternion.Inverse(transform.rotation) * head.rotation;
+        }
+
         private void LockFoot(AvatarIKGoal goal, Vector3 position, Quaternion rotation)
         {
             animator.SetIKPositionWeight(goal, 1f);
@@ -62,3 +79,4 @@ namespace FogHarbor.Player
         }
     }
 }
+

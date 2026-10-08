@@ -38,6 +38,8 @@ namespace FogHarbor.Player
         [Header("攻击")]
         [SerializeField] private float attackRange = 2f;
         [SerializeField] private float attackCooldown = 1.7f;
+        [Tooltip("镐子连续攻击间隔（秒），与采矿动作时长匹配")]
+        [SerializeField] private float miningAttackCooldown = 1.2f;
         [SerializeField] private int baseAttackDamage = 5;
         [Tooltip("移动中跳劈的前进距离（米）；原地跳劈不位移")]
         [SerializeField] private float jumpAttackTravelDistance = 1.2f;
@@ -55,6 +57,7 @@ namespace FogHarbor.Player
         [SerializeField] private int maxHp = 100;
 
         private CharacterController controller;
+        private PlayerWeaponVisual weaponVisual;
         private float standingHeight;
         private Vector3 standingCenter;
         private bool isCrouching;
@@ -68,7 +71,7 @@ namespace FogHarbor.Player
         private Vector3 jumpAttackPendingMotion;
         private bool jumpAttackActive;
         private int currentHp;
-        private Coroutine respawnRoutine;
+        private Coroutine deathRoutine;
 
         // 跳跃状态
         private float lastGroundedTime = -999f;
@@ -97,6 +100,9 @@ namespace FogHarbor.Player
         /// <summary>单次剑击开始时触发，供动画与持剑外观订阅。</summary>
         public event Action OnAttackStarted;
 
+        public event Action OnReviveReady;
+        public bool CanRevive { get; private set; }
+        public bool IsDead => currentHp <= 0;
         public int CurrentHp => currentHp;
         public int MaxHp => maxHp;
         /// <summary>总攻击 = 基础攻击 + 装备加成。</summary>
@@ -119,7 +125,7 @@ namespace FogHarbor.Player
         public bool IsGrounded => controller != null && controller.isGrounded;
 
         /// <summary>是否处于采集等定身状态（外部脚本/AI 可查询）。</summary>
-        public bool IsBusy => Time.time < busyUntil || (attackInProgress && Time.time < attackSafetyUntil);
+        public bool IsBusy => IsDead || Time.time < busyUntil || (attackInProgress && Time.time < attackSafetyUntil);
 
         /// <summary>是否处于跳跃后的腾空状态。</summary>
         public bool IsJumping => isJumping;
@@ -133,7 +139,7 @@ namespace FogHarbor.Player
         /// </summary>
         public void RequestJump()
         {
-            if (isCrouching) return;
+            if (IsDead || isCrouching) return;
             jumpRequestTime = Time.time;
         }
 
@@ -143,6 +149,7 @@ namespace FogHarbor.Player
         /// </summary>
         public void PlayGather(Vector3 targetPosition)
         {
+            if (IsDead) return;
             Vector3 dir = targetPosition - transform.position;
             dir.y = 0f;
             if (dir.sqrMagnitude > 0.001f)
@@ -155,9 +162,26 @@ namespace FogHarbor.Player
         /// <summary>播放一次剑击；鼠标输入和外部调用共用此入口。</summary>
         public void PlayAttack()
         {
-            if (IsBusy || Time.time < lastAttackTime + attackCooldown)
+            // Swords require an explicit draw; mining tools remain ready when equipped.
+            if (weaponVisual == null || !weaponVisual.CanAttack)
                 return;
 
+            float cooldown = weaponVisual != null && weaponVisual.IsMiningTool ? miningAttackCooldown : attackCooldown;
+            if (IsBusy || Time.time < lastAttackTime + cooldown)
+                return;
+
+            // The mining clip is a planted, standing strike.
+            if (weaponVisual != null && weaponVisual.IsMiningTool)
+            {
+                if (isJumping) return;
+                if (isCrouching)
+                {
+                    if (!CanStandUp()) return;
+                    isCrouching = false;
+                    controller.height = standingHeight;
+                    controller.center = standingCenter;
+                }
+            }
             lastAttackTime = Time.time;
             attackInProgress = true;
             attackHitApplied = false;
@@ -174,6 +198,7 @@ namespace FogHarbor.Player
         /// <summary>由 Attack 状态回调；命中和动作锁定跟随动画进度。</summary>
         public void OnAttackAnimationEnter(bool isJumpAttack)
         {
+            if (IsDead) return;
             attackInProgress = true;
             attackHitApplied = false;
             attackSafetyUntil = Time.time + 4f;
@@ -183,7 +208,7 @@ namespace FogHarbor.Player
 
         public void OnAttackAnimationProgress(float normalizedTime, float hitProgress)
         {
-            if (!attackInProgress)
+            if (IsDead || !attackInProgress)
                 return;
 
             if (jumpAttackActive && jumpAttackDirection.sqrMagnitude > 0.01f)
@@ -216,6 +241,7 @@ namespace FogHarbor.Player
         /// 模型从腰间切到手上由 PlayerWeaponVisual 跟随动画进度处理。</summary>
         public void PlayDrawSword()
         {
+            if (IsDead) return;
             OnDrawSwordStarted?.Invoke();
             busyUntil = Time.time + drawSwordLockTime;
         }
@@ -223,6 +249,7 @@ namespace FogHarbor.Player
         /// <summary>播放一次收刀动作：短暂定身（模型切回腰间由 PlayerWeaponVisual 处理）。</summary>
         public void PlaySheatheSword()
         {
+            if (IsDead) return;
             OnSheatheSwordStarted?.Invoke();
             busyUntil = Time.time + sheatheSwordLockTime;
         }
@@ -230,6 +257,7 @@ namespace FogHarbor.Player
         private void Awake()
         {
             controller = GetComponent<CharacterController>();
+            weaponVisual = GetComponent<PlayerWeaponVisual>();
             standingHeight = controller.height;
             standingCenter = controller.center;
             currentHp = maxHp;
@@ -288,7 +316,7 @@ namespace FogHarbor.Player
         private void HandleMovement()
         {
             // 有面板打开时屏蔽世界输入：重力照常，但移动/奔跑/跳跃都不响应
-            bool blocked = GameInput.Blocked;
+            bool blocked = IsDead || GameInput.Blocked;
             bool grounded = controller.isGrounded;
 
             float h = blocked ? 0f : Input.GetAxisRaw("Horizontal");
@@ -358,10 +386,36 @@ namespace FogHarbor.Player
 
         /// <summary>挥砍命中结算：由 Attack 状态到达剑刃接触进度时调用。
         /// 击退由 EnemyWolf.TakeDamage 内部处理，所以"打到哪一刻推哪一刻"。</summary>
+        public float MiningReach => attackRange;
+
         private void ResolveAttackHit()
         {
+            // Reject late animation callbacks after sheathing or changing equipment.
+            if (weaponVisual == null || !weaponVisual.CanAttack) return;
             Vector3 center = transform.position + transform.forward * attackRange * 0.5f;
             Collider[] hits = Physics.OverlapSphere(center, attackRange * 0.5f);
+            if (weaponVisual != null && weaponVisual.IsMiningTool)
+            {
+                FogHarbor.Items.QuestItemPickup nearestOre = null;
+                float nearestOreDistance = float.PositiveInfinity;
+                var miningHits = Physics.OverlapSphere(transform.position + Vector3.up * 0.5f,
+                    attackRange, ~0, QueryTriggerInteraction.Collide);
+                foreach (var hit in miningHits)
+                {
+                    var ore = hit.GetComponentInParent<FogHarbor.Items.QuestItemPickup>();
+                    if (ore == null || !ore.CanMine(this, out float surfaceDistance)) continue;
+                    if (surfaceDistance < nearestOreDistance)
+                    {
+                        nearestOre = ore;
+                        nearestOreDistance = surfaceDistance;
+                    }
+                }
+                if (nearestOre != null)
+                {
+                    nearestOre.TryMine(this);
+                    return;
+                }
+            }
             EnemyWolf target = null;
             float nearestSqrDistance = float.PositiveInfinity;
 
@@ -392,6 +446,7 @@ namespace FogHarbor.Player
         /// <summary>外部调用：让玩家受到伤害（防御减伤：总防御抵扣伤害，最少 1 点）。</summary>
         public void TakeDamage(int damage)
         {
+            if (IsDead) return;
             int effectiveDamage = Mathf.Max(1, damage - Defense);
             currentHp = Mathf.Max(0, currentHp - effectiveDamage);
             Debug.Log($"[PlayerController] 受到 {damage} 伤害（防御 {Defense} 减伤 {damage - effectiveDamage}），实际 {effectiveDamage}，剩余 HP: {currentHp}");
@@ -400,34 +455,56 @@ namespace FogHarbor.Player
             if (UIManager.Instance != null)
                 UIManager.Instance.ShowToast($"受到 {effectiveDamage} 点伤害");
 
-            if (currentHp <= 0 && respawnRoutine == null)
+            if (currentHp <= 0 && deathRoutine == null)
             {
-                Debug.Log("[PlayerController] 玩家死亡，重生回小镇");
-                respawnRoutine = StartCoroutine(RespawnRoutine());
+                OnAttackAnimationExit();
+                jumpAttackPendingMotion = Vector3.zero;
+                jumpRequestTime = -999f;
+                busyUntil = -999f;
+                verticalVelocity = Mathf.Min(0f, verticalVelocity);
+                Debug.Log("[PlayerController] 玩家死亡，播放死亡动画后等待复活");
+                deathRoutine = StartCoroutine(DeathRoutine());
             }
         }
 
-        private IEnumerator RespawnRoutine()
+        private IEnumerator DeathRoutine()
         {
-            if (UIManager.Instance != null)
-                UIManager.Instance.ShowToast("你被击败了…回到了小镇");
-            yield return new WaitForSecondsRealtime(1.5f);
-            respawnRoutine = null;
-            if (currentHp <= 0) SceneManager.LoadScene("Town");
+            // Match the Animator's scaled time so pausing does not cut the death animation short.
+            var animationDriver = GetComponent<PlayerAnimatorDriver>();
+            float delay = animationDriver != null ? animationDriver.DeathDuration : 1.5f;
+            yield return new WaitForSeconds(delay);
+            deathRoutine = null;
+            if (IsDead)
+            {
+                CanRevive = true;
+                OnReviveReady?.Invoke();
+            }
         }
 
-        private void CancelPendingRespawn()
+        /// <summary>Death UI intent: revive in Town only after the death animation completes.</summary>
+        public bool RequestRevive()
         {
-            if (respawnRoutine == null) return;
-            StopCoroutine(respawnRoutine);
-            respawnRoutine = null;
+            if (!IsDead || !CanRevive) return false;
+            CanRevive = false;
+            var session = FindObjectOfType<FogHarbor.Session.GameSession>();
+            if (session != null && session.ChangeScene("Town", true)) return true;
+            CanRevive = true;
+            return false;
+        }
+
+        private void CancelPendingDeath()
+        {
+            CanRevive = false;
+            if (deathRoutine == null) return;
+            StopCoroutine(deathRoutine);
+            deathRoutine = null;
         }
 
         /// <summary>外部调用：让玩家恢复生命值。</summary>
         public void Heal(int amount)
         {
             currentHp = Mathf.Min(maxHp, currentHp + amount);
-            if (currentHp > 0) CancelPendingRespawn();
+            if (currentHp > 0) CancelPendingDeath();
             Debug.Log($"[PlayerController] 恢复 {amount} 点生命，当前 HP: {currentHp}");
             OnPlayerHpChanged?.Invoke(currentHp, maxHp);
         }
@@ -436,14 +513,31 @@ namespace FogHarbor.Player
         public void SetHp(int hp)
         {
             currentHp = Mathf.Clamp(hp, 0, maxHp);
-            if (currentHp > 0) CancelPendingRespawn();
+            if (currentHp > 0) CancelPendingDeath();
             OnPlayerHpChanged?.Invoke(currentHp, maxHp);
+        }
+
+        public void RestorePose(Vector3 position, float yaw)
+        {
+            bool wasEnabled = controller != null && controller.enabled;
+            if (controller != null) controller.enabled = false;
+            transform.SetPositionAndRotation(position, Quaternion.Euler(0, yaw, 0));
+            verticalVelocity = 0;
+            isJumping = false;
+            jumpRequestTime = lastGroundedTime = -999f;
+            jumpAttackPendingMotion = Vector3.zero;
+            Physics.SyncTransforms();
+            if (controller != null) controller.enabled = wasEnabled;
         }
 
         public void RestoreHealth(int hp, int savedMaxHp)
         {
             maxHp = Mathf.Max(1, savedMaxHp);
             SetHp(hp);
+            if (IsDead) CanRevive = true;
         }
     }
 }
+
+
+

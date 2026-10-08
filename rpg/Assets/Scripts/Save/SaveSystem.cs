@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using FogHarbor.Session;
 using FogHarbor.Inventory;
 using FogHarbor.Equipment;
 using FogHarbor.Player;
@@ -19,7 +21,7 @@ namespace FogHarbor.Save
     /// </summary>
     public class SaveSystem : MonoBehaviour
     {
-        private const int SAVE_VERSION = 1;
+        private const int SAVE_VERSION = 2;
 
         private static string SaveDir => Application.persistentDataPath;
         private string slotName = "fog_harbor_save";
@@ -43,6 +45,9 @@ namespace FogHarbor.Save
         /// <summary>存档/读档完成时触发。</summary>
         public event Action OnSaveComplete;
         public event Action OnLoadComplete;
+        public event Action<bool, string> OnSaveResult;
+        public string LastSaveMessage { get; private set; }
+        public float LastSaveTime { get; private set; } = -100f;
 
         // ─── 初始化 ───
 
@@ -68,9 +73,14 @@ namespace FogHarbor.Save
         {
             public int version = SAVE_VERSION;
             public int gold;
+            public bool hasLocation;
+            public string sceneName;
+            public Vector3 playerPosition;
+            public float playerYaw;
             public int hp;
             public int maxHp;
             public List<InventoryEntry> inventory;
+            public List<string> starterItemGrants;
             public EquipmentSystem.EquipmentSaveData equipment;
             public List<QuestEntry> quests;
             public List<RelationshipEntry> relationships;
@@ -88,7 +98,8 @@ namespace FogHarbor.Save
         /// <summary>保存游戏状态到磁盘。</summary>
         public bool Save(PlayerController player = null)
         {
-            return WriteSnapshot(Capture(player));
+            try { return WriteSnapshot(Capture(player)); }
+            catch (Exception ex) { return ReportFailure(ex); }
         }
 
         public SaveData Capture(PlayerController player = null)
@@ -97,9 +108,14 @@ namespace FogHarbor.Save
             var data = new SaveData
             {
                 gold = rewardService.GetSaveGold(),
+                hasLocation = player != null && IsGameplayScene(player.gameObject.scene.name),
+                sceneName = player != null ? player.gameObject.scene.name : null,
+                playerPosition = player != null ? player.transform.position : Vector3.zero,
+                playerYaw = player != null ? player.transform.eulerAngles.y : 0,
                 hp = player != null ? player.CurrentHp : 100,
                 maxHp = player != null ? player.MaxHp : 100,
                 inventory = inventory.GetSaveData(),
+                starterItemGrants = inventory.GetStarterItemGrants(),
                 equipment = equipment.GetSaveData(),
                 quests = new List<QuestEntry>(),
                 relationships = relationshipSystem.GetSaveData()
@@ -122,34 +138,58 @@ namespace FogHarbor.Save
         {
             try
             {
+                if (!Validate(data)) throw new InvalidDataException("Invalid save snapshot.");
                 Directory.CreateDirectory(SaveDir);
                 string json = JsonUtility.ToJson(data, true);
-
-                // 1. 写入临时文件
                 File.WriteAllText(TmpPath, json);
-
-                // 2. 校验 JSON 合法性（反序列化测试）
-                JsonUtility.FromJson<SaveData>(json);
-
-                // 3. 如果旧存档存在，备份为 .bak
+                if (!Validate(JsonUtility.FromJson<SaveData>(json))) throw new InvalidDataException("Save verification failed.");
                 if (File.Exists(SavePath)) File.Replace(TmpPath, SavePath, BakPath);
                 else File.Move(TmpPath, SavePath);
-
-                Debug.Log($"[SaveSystem] 存档已保存: {SavePath}");
-                OnSaveComplete?.Invoke();
-                LastSaveSucceeded = true;
-                return true;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                LastSaveSucceeded = false;
-                Debug.LogError($"[SaveSystem] 存档失败: {e.Message}");
-
-                // 清理临时文件
                 try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch (IOException) { }
-
-                return false;
+                return ReportFailure(ex);
             }
+            Debug.Log("[SaveSystem] 存档已保存: " + SavePath);
+            PublishResult(true);
+            try { OnSaveComplete?.Invoke(); } catch (Exception ex) { Debug.LogException(ex); }
+            return true;
+        }
+
+        private bool ReportFailure(Exception ex)
+        {
+            Debug.LogError("[SaveSystem] 存档失败: " + ex.Message);
+            return PublishResult(false);
+        }
+        private bool PublishResult(bool success)
+        {
+            LastSaveSucceeded = success;
+            LastSaveMessage = success ? "已自动保存" : "保存失败，进度尚未写入磁盘，请重试。";
+            LastSaveTime = Time.unscaledTime;
+            try { OnSaveResult?.Invoke(success, LastSaveMessage); } catch (Exception ex) { Debug.LogException(ex); }
+            return success;
+        }
+        public static bool IsGameplayScene(string name) => name == "Town" || name == "Forest";
+        public string GetResumeScene(string fallback)
+        {
+            var data = Load();
+            return data != null && data.hasLocation && IsGameplayScene(data.sceneName)
+                && Application.CanStreamedLevelBeLoaded(data.sceneName) ? data.sceneName : fallback;
+        }
+        private bool quitSaved;
+        private void OnEnable() { Application.wantsToQuit += BeforeQuit; }
+        private void OnDisable() { Application.wantsToQuit -= BeforeQuit; }
+        private bool BeforeQuit() { quitSaved = SaveOnLifecycleEvent(); return quitSaved; }
+        private void OnApplicationQuit() { if (!quitSaved) SaveOnLifecycleEvent(); }
+        private void OnApplicationPause(bool paused) { if (paused) SaveOnLifecycleEvent(); }
+        private bool SaveOnLifecycleEvent()
+        {
+            var session = GetComponent<GameSession>();
+            var player = FindObjectOfType<PlayerController>();
+            if (session != null && session.IsReadyToSave && player != null && IsGameplayScene(player.gameObject.scene.name))
+                return Save(player);
+            return true;
         }
 
         // ─── 读取 ───
@@ -241,6 +281,7 @@ namespace FogHarbor.Save
 
             // 恢复背包
             inventory.LoadFromData(data.inventory);
+            inventory.LoadStarterItemGrants(data.starterItemGrants);
 
             // 恢复装备
             equipment.LoadFromData(data.equipment);
@@ -264,6 +305,8 @@ namespace FogHarbor.Save
             if (player != null)
             {
                 player.RestoreHealth(data.hp, data.maxHp);
+                if (data.hasLocation && data.sceneName == player.gameObject.scene.name)
+                    player.RestorePose(data.playerPosition, data.playerYaw);
                 Debug.Log($"[SaveSystem] 玩家 HP 已恢复: {data.hp}/{data.maxHp}");
             }
 
@@ -272,11 +315,16 @@ namespace FogHarbor.Save
             return true;
         }
 
+        private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value) && Mathf.Abs(value) <= 100000f;
+
         public static bool Validate(SaveData data)
         {
-            if (data == null || data.version != SAVE_VERSION || data.gold < 0
+            if (data == null || (data.version != 1 && data.version != SAVE_VERSION) || data.gold < 0
                 || data.maxHp <= 0 || data.hp < 0 || data.hp > data.maxHp
                 || data.inventory == null || data.quests == null) return false;
+            if (data.hasLocation && (!IsGameplayScene(data.sceneName)
+                || !Finite(data.playerPosition.x) || !Finite(data.playerPosition.y) || !Finite(data.playerPosition.z)
+                || !Finite(data.playerYaw))) return false;
             foreach (var entry in data.quests)
                 if (entry == null || string.IsNullOrEmpty(entry.questId)
                     || !Enum.TryParse<QuestState>(entry.state, out var state)
@@ -333,3 +381,4 @@ namespace FogHarbor.Save
         }
     }
 }
+

@@ -19,10 +19,20 @@ namespace FogHarbor.Quest
         [SerializeField] private string targetItemId;
         [SerializeField] private int targetCount = 1;
 
+        [Header("接取时提供的物资")]
+        [SerializeField] private FogHarbor.Items.ItemData acceptanceItem;
+        [Min(1)][SerializeField] private int acceptanceItemCount = 1;
+
         [Header("奖励")]
         [SerializeField] private int rewardGold;
         [SerializeField] private string rewardItemId;
         [SerializeField] private int rewardItemCount;
+
+        [Header("好感奖励")]
+        [Tooltip("交付对象 NPC 的 npcId；留空表示交付不加好感")]
+        [SerializeField] private string rewardNpcId;
+        [Tooltip("交付成功时增加的好感度")]
+        [SerializeField] private int rewardFavor;
 
         public string QuestId => questId;
         public string Title => title;
@@ -30,8 +40,13 @@ namespace FogHarbor.Quest
         public bool IsMainQuest => isMainQuest;
         public string TargetItemId => targetItemId;
         public int TargetCount => targetCount;
+        public FogHarbor.Items.ItemData AcceptanceItem => acceptanceItem;
+        public int AcceptanceItemCount => acceptanceItemCount;
         public int RewardGold => rewardGold;
         public string RewardItemId => rewardItemId;
         public int RewardItemCount => rewardItemCount;
+        public string RewardNpcId => rewardNpcId;
+        public int RewardFavor => rewardFavor;
     }
 }
+
