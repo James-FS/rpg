@@ -1,5 +1,7 @@
 # 雾港小镇（Fog Harbor）
 
+![雾港小镇游戏封面](readme-assets/fogharbor-cover.png)
+
 雾港小镇是一款使用团结引擎（Tuanjie Engine）制作的第三人称 RPG 原型。玩家在小镇和森林之间探索、与 NPC 对话、完成任务、采集资源并与灰狼战斗。NPC 对话接入外部 AIBot Server；任务状态、物品、战斗和存档由游戏代码管理。
 
 ## 当前工程信息
