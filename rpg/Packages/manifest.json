@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "cn.tuanjie.ai.generators": "file:../.codely-cli/extensions/TJGenerators/Packages/cn.tuanjie.ai.generators",
     "com.aibot.npcagent": "file:D:/Code/aibot/Packages/com.aibot.npcagent",
     "com.unity.collab-proxy": "2.12.4",
     "com.unity.feature.development": "1.0.1",
