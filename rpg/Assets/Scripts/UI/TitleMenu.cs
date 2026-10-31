@@ -13,6 +13,7 @@ namespace FogHarbor.UI
     public class TitleMenu : MonoBehaviour
     {
         public const string SceneName = "Title";
+        private static string startupMessage;
         public TMP_FontAsset chineseFont;
         public Texture2D background;
         public Texture2D shade;
@@ -27,6 +28,8 @@ namespace FogHarbor.UI
         public bool HasJourney => File.Exists(SaveFile("json")) || File.Exists(SaveFile("bak"));
         public bool IsLaunching => launching;
         public bool SettingsOpen => settings != null && settings.activeSelf;
+
+        public static void SetStartupMessage(string text) => startupMessage = text;
 
         private void Awake()
         {
@@ -62,6 +65,11 @@ namespace FogHarbor.UI
             if (continueGroup == null) continueGroup = continueButton.gameObject.AddComponent<CanvasGroup>();
             continueGroup.alpha = HasJourney ? 1f : 0.45f;
             saveHint.text = HasJourney ? "已有旅程 · 从小镇继续" : "尚无存档 · 开启你的第一段旅程";
+            if (!string.IsNullOrEmpty(startupMessage))
+            {
+                message.text = startupMessage;
+                startupMessage = null;
+            }
             settings.SetActive(false);
             confirmation.SetActive(false);
             fade.alpha = 0;

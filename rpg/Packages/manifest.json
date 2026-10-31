@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.aibot.npcagent": "file:D:/Code/aibot/Packages/com.aibot.npcagent",
+    "com.aibot.npcagent": "file:../../../aibot/Packages/com.aibot.npcagent",
     "com.unity.collab-proxy": "2.12.4",
     "com.unity.feature.development": "1.0.1",
     "com.unity.render-pipelines.universal": "14.2.0-t1",

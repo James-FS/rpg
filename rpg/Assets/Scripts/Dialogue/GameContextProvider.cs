@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using AIBot.Core.Context;
@@ -5,6 +6,7 @@ using AIBot.Unity;
 using FogHarbor.Inventory;
 using FogHarbor.Quest;
 using FogHarbor.Relationship;
+using FogHarbor.Session;
 using Newtonsoft.Json;
 
 namespace FogHarbor.Dialogue
@@ -24,21 +26,14 @@ namespace FogHarbor.Dialogue
         private RewardService rewardService;
         private RelationshipSystem relationshipSystem;
 
-        private void Awake()
+        private void Start()
         {
-            ResolveSystems();
-        }
-
-        /// <summary>
-        /// Town/Forest 直接启动时 AppRoot 可能在当前场景对象 Awake 之后才创建。
-        /// 每次读取快照时补绑，避免 Awake 时的空引用被永久缓存。
-        /// </summary>
-        private void ResolveSystems()
-        {
-            if (questSystem == null) questSystem = FindObjectOfType<QuestSystem>();
-            if (inventory == null) inventory = FindObjectOfType<InventorySystem>();
-            if (rewardService == null) rewardService = FindObjectOfType<RewardService>();
-            if (relationshipSystem == null) relationshipSystem = FindObjectOfType<RelationshipSystem>();
+            var session = GameSession.Instance
+                ?? throw new MissingComponentException("GameContextProvider requires a composed GameSession.");
+            questSystem = session.Quests;
+            inventory = session.Inventory;
+            rewardService = session.Wallet;
+            relationshipSystem = session.Relationships;
         }
 
         /// <summary>剧情阶段由主任务状态推导，供 loreBlocks 的 unlockStage 门控与 Prompt「当前阶段」使用。</summary>
@@ -46,57 +41,52 @@ namespace FogHarbor.Dialogue
         {
             get
             {
-                ResolveSystems();
                 return ResolveStage();
             }
         }
 
         private int ResolveStage()
         {
-            string questId = questSystem != null ? questSystem.GetMainQuestId() : null;
-            if (string.IsNullOrEmpty(questId)) return 0;
+            string questId = questSystem.GetMainQuestId();
+            if (string.IsNullOrEmpty(questId)) throw new InvalidOperationException("No main quest is registered.");
             switch (questSystem.GetState(questId))
             {
+                case QuestState.Available: return 0;
                 case QuestState.Accepted: return 1;
                 case QuestState.Completed: return 2;
                 case QuestState.Rewarded: return 3;
-                default: return 0;   // Available 或未知状态
+                default: throw new ArgumentOutOfRangeException(nameof(questId), questId, "Quest has an unsupported state.");
             }
         }
 
         private string GetCurrentNpcId()
         {
             // 与 NpcAgent 同物体：优先取 Connection Profile 的 npcId，其次 agent.npcId。
-            var agent = GetComponentInParent<NpcAgent>();
-            if (agent != null)
-            {
-                if (agent.connectionProfile != null && !string.IsNullOrEmpty(agent.connectionProfile.npcId))
-                    return agent.connectionProfile.npcId;
-                if (!string.IsNullOrEmpty(agent.npcId))
-                    return agent.npcId;
-            }
-            return null;
+            var agent = GetComponentInParent<NpcAgent>()
+                ?? throw new MissingComponentException("GameContextProvider requires a parent NpcAgent.");
+            string npcId = agent.connectionProfile != null && !string.IsNullOrEmpty(agent.connectionProfile.npcId)
+                ? agent.connectionProfile.npcId : agent.npcId;
+            if (string.IsNullOrEmpty(npcId)) throw new InvalidOperationException($"NpcAgent '{agent.name}' has no npcId.");
+            return npcId;
         }
 
         public string SnapshotJson
         {
             get
             {
-                ResolveSystems();
-                string mainQuestId = questSystem?.GetMainQuestId();
-                var quest = !string.IsNullOrEmpty(mainQuestId) ? questSystem.GetQuest(mainQuestId) : null;
-                string targetItemId = quest != null ? quest.TargetItemId : null;
-                int targetCount = quest != null ? quest.TargetCount : 1;
+                string mainQuestId = questSystem.GetMainQuestId();
+                var quest = questSystem.GetQuest(mainQuestId)
+                    ?? throw new InvalidOperationException($"Main quest '{mainQuestId}' has no definition.");
+                string targetItemId = quest.TargetItemId;
+                int targetCount = quest.TargetCount;
 
                 var snapshot = new Dictionary<string, object>
                 {
                     ["questId"] = mainQuestId,
-                    ["questState"] = !string.IsNullOrEmpty(mainQuestId) && questSystem != null
-                        ? questSystem.GetState(mainQuestId).ToString()
-                        : "unknown",
+                    ["questState"] = questSystem.GetState(mainQuestId).ToString(),
                     ["hasQuestTarget"] = !string.IsNullOrEmpty(targetItemId)
-                        && inventory != null && inventory.Has(targetItemId, targetCount),
-                    ["gold"] = rewardService != null ? rewardService.Gold : 0,
+                        && inventory.Has(targetItemId, targetCount),
+                    ["gold"] = rewardService.Gold,
                     ["inventory"] = GetItemList(),
                     // 与 SimGameState 同名：Server 会把它合并进会话状态，工具与状态面板据此显示
                     ["stage"] = CurrentStage
@@ -107,7 +97,7 @@ namespace FogHarbor.Dialogue
                 if (!string.IsNullOrEmpty(npcId))
                 {
                     snapshot["npcId"] = npcId;
-                    snapshot["favorability"] = relationshipSystem != null ? relationshipSystem.GetFavor(npcId) : 0;
+                    snapshot["favorability"] = relationshipSystem.GetFavor(npcId);
                 }
 
                 return JsonConvert.SerializeObject(snapshot, Formatting.None);
@@ -117,11 +107,8 @@ namespace FogHarbor.Dialogue
         private List<string> GetItemList()
         {
             var list = new List<string>();
-            if (inventory != null)
-            {
-                foreach (var pair in inventory.GetAll())
-                    list.Add($"{pair.Key} x{pair.Value}");
-            }
+            foreach (var pair in inventory.GetAll())
+                list.Add($"{pair.Key} x{pair.Value}");
             return list;
         }
     }

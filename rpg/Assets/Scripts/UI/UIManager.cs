@@ -51,15 +51,23 @@ namespace FogHarbor.UI
 
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+                throw new System.InvalidOperationException("Only one UIManager may exist at a time.");
+
+            inventory = GetComponent<InventorySystem>()
+                ?? throw new MissingComponentException("UIManager requires InventorySystem on AppRoot.");
+            equipment = GetComponent<EquipmentSystem>()
+                ?? throw new MissingComponentException("UIManager requires EquipmentSystem on AppRoot.");
+            questSystem = GetComponent<QuestSystem>()
+                ?? throw new MissingComponentException("UIManager requires QuestSystem on AppRoot.");
+            rewardService = GetComponent<RewardService>()
+                ?? throw new MissingComponentException("UIManager requires RewardService on AppRoot.");
+            gameSession = GetComponent<GameSession>()
+                ?? throw new MissingComponentException("UIManager requires GameSession on AppRoot.");
+            saveSystem = GetComponent<SaveSystem>()
+                ?? throw new MissingComponentException("UIManager requires SaveSystem on AppRoot.");
+
             Instance = this;
-
-            inventory = GetComponent<InventorySystem>();
-            equipment = GetComponent<EquipmentSystem>();
-            questSystem = GetComponent<QuestSystem>();
-            rewardService = GetComponent<RewardService>();
-            gameSession = GetComponent<GameSession>();
-            saveSystem = GetComponent<SaveSystem>();
-
             CreateEventSystem();
         }
 
@@ -79,6 +87,7 @@ namespace FogHarbor.UI
             inventoryPanel = GetOrCreatePanel<InventoryPanel>("InventoryPanel", canvas);
             questPanel = GetOrCreatePanel<QuestPanel>("QuestPanel", canvas);
             dialoguePanel = GetOrCreatePanel<DialoguePanel>("DialoguePanel", canvas);
+            dialoguePanel.Initialize(gameSession);
             deathPanel = GetOrCreatePanel<DeathPanel>("DeathPanel", canvas);
             deathPanel.Initialize(RequestRevive);
             deathPanel.Hide();
@@ -257,22 +266,27 @@ namespace FogHarbor.UI
 
         public void RequestEquip(string itemId)
         {
-            gameSession?.EquipItem(itemId);
+            ShowActionFailure(gameSession.EquipItem(itemId));
         }
 
         public void RequestUnequip(string itemId)
         {
-            gameSession?.UnequipItem(itemId);
+            ShowActionFailure(gameSession.UnequipItem(itemId));
         }
 
         public void RequestUseItem(string itemId)
         {
-            gameSession?.UseItem(itemId);
+            ShowActionFailure(gameSession.UseItem(itemId));
         }
 
         public void RequestDrop(string itemId)
         {
-            gameSession?.DropItem(itemId);
+            ShowActionFailure(gameSession.DropItem(itemId));
+        }
+
+        private void ShowActionFailure(QuestResult result)
+        {
+            if (!result.Success) ShowToast(result.Message);
         }
 
         // ─── 内部 ───
@@ -280,7 +294,7 @@ namespace FogHarbor.UI
         private void FindPlayer()
         {
             UnbindPlayer();
-            player = FindObjectOfType<PlayerController>();
+            player = gameSession.BindPlayerFromScene();
             if (player != null)
             {
                 player.OnPlayerHpChanged += HandlePlayerHpChanged;

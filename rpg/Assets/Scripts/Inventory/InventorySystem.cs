@@ -31,11 +31,14 @@ namespace FogHarbor.Inventory
 
         public bool Has(string itemId, int count = 1)
         {
+            ItemDatabase.GetById(itemId);
+            if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Inventory queries require a positive count.");
             return items.TryGetValue(itemId, out int owned) && owned >= count;
         }
 
         public int GetCount(string itemId)
         {
+            ItemDatabase.GetById(itemId);
             return items.TryGetValue(itemId, out int count) ? count : 0;
         }
 
@@ -43,10 +46,11 @@ namespace FogHarbor.Inventory
 
         public void Add(string itemId, int count)
         {
-            if (count <= 0) return;
+            ItemDatabase.GetById(itemId);
+            if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Inventory additions require a positive count.");
 
             if (items.ContainsKey(itemId))
-                items[itemId] += count;
+                items[itemId] = checked(items[itemId] + count);
             else
                 items[itemId] = count;
 
@@ -56,7 +60,8 @@ namespace FogHarbor.Inventory
 
         public bool Remove(string itemId, int count)
         {
-            if (count <= 0) return true;
+            ItemDatabase.GetById(itemId);
+            if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Inventory removals require a positive count.");
             if (!Has(itemId, count)) return false;
 
             items[itemId] -= count;
@@ -74,15 +79,14 @@ namespace FogHarbor.Inventory
             itemData = null;
             if (string.IsNullOrEmpty(itemId)) return ConsumeResult.InvalidItemId;
 
-            itemData = ItemDatabase.GetById(itemId);
-            if (itemData == null) return ConsumeResult.UnknownItem;
+            if (!ItemDatabase.TryGetById(itemId, out itemData)) return ConsumeResult.UnknownItem;
             if (itemData.Type != ItemType.Consumable) return ConsumeResult.NotConsumable;
             if (!Remove(itemId, 1)) return ConsumeResult.NotOwned;
 
             return ConsumeResult.Success;
         }
 
-        /// <summary>Grant newly introduced starter items once, including older saves.</summary>
+        /// <summary>Grant newly introduced starter items once, including migrated saves.</summary>
         public bool EnsureStarterItems(string equippedWeapon, string equippedArmor)
         {
             bool changed = false;
@@ -100,10 +104,16 @@ namespace FogHarbor.Inventory
 
         public void LoadStarterItemGrants(List<string> grants)
         {
+            if (grants == null) throw new ArgumentNullException(nameof(grants));
+            var restored = new HashSet<string>();
+            foreach (string id in grants)
+            {
+                ItemDatabase.GetById(id);
+                if (!restored.Add(id))
+                    throw new InvalidOperationException($"Duplicate starter item grant '{id}' in save data.");
+            }
             starterItemGrants.Clear();
-            if (grants != null)
-                foreach (string id in grants)
-                    if (!string.IsNullOrEmpty(id)) starterItemGrants.Add(id);
+            foreach (string id in restored) starterItemGrants.Add(id);
         }
 
         // ─── 存档支持 ───
@@ -117,18 +127,23 @@ namespace FogHarbor.Inventory
             return list;
         }
 
-        /// <summary>从存档恢复背包数据（data 为 null 表示空背包，同样要通知 UI 清空显示）。</summary>
+        /// <summary>从已校验的存档快照恢复背包数据，并在提交后通知 UI。</summary>
         public void LoadFromData(List<InventoryEntry> data)
         {
-            items.Clear();
-            if (data != null)
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            var restored = new Dictionary<string, int>();
+            foreach (var entry in data)
             {
-                foreach (var entry in data)
-                {
-                    if (!string.IsNullOrEmpty(entry.itemId) && entry.count > 0)
-                        items[entry.itemId] = entry.count;
-                }
+                if (entry == null) throw new InvalidOperationException("Save data contains a null inventory entry.");
+                ItemDatabase.GetById(entry.itemId);
+                if (entry.count <= 0) throw new InvalidOperationException($"Invalid inventory count for '{entry.itemId}': {entry.count}.");
+                if (restored.ContainsKey(entry.itemId))
+                    throw new InvalidOperationException($"Duplicate inventory entry '{entry.itemId}' in save data.");
+                restored.Add(entry.itemId, entry.count);
             }
+
+            items.Clear();
+            foreach (var pair in restored) items.Add(pair.Key, pair.Value);
 
             Debug.Log($"[Inventory] 从存档恢复 {items.Count} 种物品");
             OnInventoryChanged?.Invoke();

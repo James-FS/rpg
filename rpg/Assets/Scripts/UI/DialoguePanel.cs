@@ -47,6 +47,14 @@ namespace FogHarbor.UI
         private sealed class Message { public RectTransform rect; public TMP_Text speaker, text; public bool player; }
 
         private void Awake() { EnsureUI(); BindEvents(); }
+        public void Initialize(GameSession gameSession)
+        {
+            session = gameSession ?? throw new ArgumentNullException(nameof(gameSession));
+            quests = session.Quests;
+            inventory = session.Inventory;
+            relationships = session.Relationships;
+        }
+
         public void Show(string npcName, NpcAgent npcAgent)
         {
             EnsureUI();
@@ -106,13 +114,14 @@ namespace FogHarbor.UI
                 agent.onCancelled.AddListener(OnCancelled); agent.onBusy.AddListener(OnBusy);
                 agent.onToolExecuted.AddListener(OnToolExecuted);
             }
-            quests = FindObjectOfType<QuestSystem>();
-            inventory = FindObjectOfType<InventorySystem>();
-            relationships = FindObjectOfType<RelationshipSystem>();
-            session = FindObjectOfType<GameSession>();
-            if (quests != null) { quests.OnQuestStateChanged -= QuestChanged; quests.OnQuestStateChanged += QuestChanged; }
-            if (inventory != null) { inventory.OnInventoryChanged -= RefreshTopics; inventory.OnInventoryChanged += RefreshTopics; }
-            if (relationships != null) { relationships.OnFavorChanged -= FavorChanged; relationships.OnFavorChanged += FavorChanged; }
+            if (quests == null || inventory == null || relationships == null || session == null)
+                throw new InvalidOperationException("DialoguePanel.Initialize must be called before Subscribe.");
+            quests.OnQuestStateChanged -= QuestChanged;
+            quests.OnQuestStateChanged += QuestChanged;
+            inventory.OnInventoryChanged -= RefreshTopics;
+            inventory.OnInventoryChanged += RefreshTopics;
+            relationships.OnFavorChanged -= FavorChanged;
+            relationships.OnFavorChanged += FavorChanged;
         }
         private void Unsubscribe()
         {
@@ -127,7 +136,7 @@ namespace FogHarbor.UI
             if (inventory != null) inventory.OnInventoryChanged -= RefreshTopics;
             if (relationships != null) relationships.OnFavorChanged -= FavorChanged;
         }
-        private QuestState CurrentState => guide != null && guide.quest != null && quests != null
+        private QuestState CurrentState => guide != null && guide.quest != null
             ? quests.GetState(guide.quest.QuestId) : QuestState.Available;
         private void QuestChanged(string id, QuestState state) { RefreshTopics(); }
         private void FavorChanged(string id, int favor) { if (id == npcId) UpdateFavor(); }
@@ -141,7 +150,7 @@ namespace FogHarbor.UI
             };
             if (topics == null) topics = Array.Empty<DialogueTopic>();
             // A pre-collected target can also be handed in; the system still validates the operation.
-            if (guide != null && guide.quest != null && quests != null && quests.CanComplete(guide.quest.QuestId)) {
+            if (guide != null && guide.quest != null && quests.CanComplete(guide.quest.QuestId)) {
                 topics = guide.Topics(QuestState.Completed) ?? Array.Empty<DialogueTopic>();
             }
             for (int i=0;i<topicButtons.Length;i++) {

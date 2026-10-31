@@ -265,7 +265,7 @@ namespace FogHarbor.Debugging
             var quest = commands.Quests.GetQuest(selectedQuest);
             var details = Label(body, "");
             refreshers.Add(() => details.text = quest.Description + "\n归属 NPC：未配置\n目标：" + quest.TargetItemId
-                + "  " + commands.Inventory.GetCount(quest.TargetItemId ?? "") + "/" + quest.TargetCount
+                + "  " + (string.IsNullOrEmpty(quest.TargetItemId) ? 0 : commands.Inventory.GetCount(quest.TargetItemId)) + "/" + quest.TargetCount
                 + "\n奖励：" + quest.RewardGold + " 金币  " + quest.RewardItemId + " ×" + quest.RewardItemCount);
             var row = Row();
             Button(row, "接取", () => Run(() => commands.QuestCommand(selectedQuest, "accept")), true);

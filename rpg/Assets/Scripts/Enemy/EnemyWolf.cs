@@ -13,6 +13,7 @@ namespace FogHarbor.Enemy
     /// 复用前调用 ResetWolf() 重置状态。
     /// 死亡触发可配置掉落（内容数据驱动），经 GameSession.PickupItem 走架构。
     /// </summary>
+    [RequireComponent(typeof(CharacterController))]
     public class EnemyWolf : MonoBehaviour
     {
         public enum WolfState { Patrol, Chase, Attack, Dead }
@@ -93,8 +94,13 @@ namespace FogHarbor.Enemy
 
         private void Awake()
         {
-            controller = GetComponent<CharacterController>();
-            if (controller == null) controller = gameObject.AddComponent<CharacterController>();
+            controller = GetComponent<CharacterController>()
+                ?? throw new MissingComponentException($"EnemyWolf '{name}' requires CharacterController.");
+            if (!string.IsNullOrEmpty(dropItemId))
+            {
+                ItemDatabase.GetById(dropItemId);
+                if (dropCount <= 0) throw new System.InvalidOperationException($"EnemyWolf '{name}' has a non-positive drop count.");
+            }
             controller.radius = ccRadius;
             controller.height = ccHeight;
             controller.center = new Vector3(0f, ccCenterY, 0f);
@@ -106,18 +112,15 @@ namespace FogHarbor.Enemy
             colorBlock = new MaterialPropertyBlock();
         }
 
-        private void OnEnable()
+        private void Start()
         {
-            // 每次从池激活时重新绑定玩家（场景切换后旧引用失效）
-            player = null;
-            var pc = FindObjectOfType<PlayerController>();
-            if (pc != null) player = pc.transform;
+            player = (GameSession.Instance
+                ?? throw new MissingComponentException("EnemyWolf requires a composed GameSession.")).Player.transform;
         }
 
         private void Update()
         {
             if (state == WolfState.Dead) return;
-            if (controller == null) return;
             Vector3 movement = Vector3.up * ApplyGravity();
 
             // 水平移动与重力一次提交，保留 CharacterController 的接地结果。
@@ -303,8 +306,7 @@ namespace FogHarbor.Enemy
             if (flashRoutine != null) { StopCoroutine(flashRoutine); flashRoutine = null; }
             SetBodyColor(new Color(0.28f, 0.28f, 0.30f, 1f), 1f);
 
-            if (UIManager.Instance != null)
-                UIManager.Instance.ShowToast("击败了灰狼！");
+            UIManager.Instance.ShowToast("击败了灰狼！");
             Debug.Log($"[EnemyWolf] {name} 死亡");
 
             // 掉落：数据驱动配置，经 GameSession.PickupItem 走架构（入库+推进任务+存档）。
@@ -323,20 +325,18 @@ namespace FogHarbor.Enemy
         /// <summary>发掉落：让 GameSession 拾取物品（复用拾取推进逻辑），并显示 toast。</summary>
         private void SpawnDrop()
         {
-            var session = FindObjectOfType<GameSession>();
-            if (session == null)
-            {
-                Debug.LogWarning($"[EnemyWolf] 未找到 GameSession，{dropItemId} 掉落未入库");
-                return;
-            }
+            var session = GameSession.Instance
+                ?? throw new MissingComponentException("EnemyWolf drop requires a composed GameSession.");
 
             var result = session.PickupItem(dropItemId, dropCount);
             var data = ItemDatabase.GetById(dropItemId);
-            string name = data != null ? data.DisplayName : dropItemId;
-            if (result.Success && UIManager.Instance != null)
-                UIManager.Instance.ShowToast($"获得 {name} x{dropCount}");
+            if (result.Success)
+                UIManager.Instance.ShowToast($"获得 {data.DisplayName} x{dropCount}");
             else if (!result.Success)
-                Debug.LogWarning($"[EnemyWolf] 掉落入库失败: {result.Message}");
+            {
+                UIManager.Instance.ShowToast(result.Message);
+                Debug.LogError($"[EnemyWolf] 掉落入库失败: {result.Message}");
+            }
         }
 
         private IEnumerator DeathRoutine()

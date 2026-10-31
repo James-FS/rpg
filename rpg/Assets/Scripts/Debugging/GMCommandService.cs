@@ -196,7 +196,7 @@ namespace FogHarbor.Debugging
                 else
                 {
                     rollback = Saves.Capture(Player);
-                    if (!Saves.Apply(beforeTest, Player)) throw new InvalidOperationException("进入测试前的快照无效");
+                    Saves.Apply(beforeTest, Player);
                     RestoreProfiles();
                     Saves.SelectTestSlot(false);
                     beforeTest = null;
@@ -245,7 +245,7 @@ namespace FogHarbor.Debugging
                 var snapshot = Saves.ReadDebugSnapshot("checkpoint");
                 await CancelRequests();
                 rollback = Saves.Capture(Player);
-                if (!Saves.Apply(snapshot, Player)) throw new InvalidOperationException("检查点无效");
+                Saves.Apply(snapshot, Player);
                 RotateIdentity();
                 return Persist("已恢复检查点，并创建新的测试 AI 身份");
             }
@@ -288,9 +288,14 @@ namespace FogHarbor.Debugging
                         if (!result.Success) return result;
                     }
                     int missing = Mathf.Max(0, def.TargetCount - countBefore);
-                    if (missing > 0 && !string.IsNullOrEmpty(def.TargetItemId)) Session.PickupItem(def.TargetItemId, missing);
+                    if (missing > 0 && !string.IsNullOrEmpty(def.TargetItemId))
+                    {
+                        var pickup = Session.PickupItem(def.TargetItemId, missing);
+                        if (!pickup.Success) return pickup;
+                    }
                     if (Quests.CanComplete(id)) Quests.Complete(id);
-                    return Persist($"{def.TargetItemId}: {countBefore} → {Inventory.GetCount(def.TargetItemId ?? "")}; {before} → {Quests.GetState(id)}；未发奖励");
+                    int countAfter = string.IsNullOrEmpty(def.TargetItemId) ? 0 : Inventory.GetCount(def.TargetItemId);
+                    return Persist($"{def.TargetItemId}: {countBefore} → {countAfter}; {before} → {Quests.GetState(id)}；未发奖励");
                 default: return QuestResult.Fail("未知命令");
             }
             if (result.Success && !Saves.LastSaveSucceeded) return QuestResult.Fail(result.Message + "；运行状态已改变，但保存失败");
@@ -307,7 +312,11 @@ namespace FogHarbor.Debugging
             {
                 if (!Inventory.Remove(id, amount)) return QuestResult.Fail("持有数量不足");
             }
-            else Session.PickupItem(id, amount);
+            else
+            {
+                var pickup = Session.PickupItem(id, amount);
+                if (!pickup.Success) return pickup;
+            }
             return Persist($"{id}: {before} → {Inventory.GetCount(id)}");
         }
 

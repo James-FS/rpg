@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using FogHarbor.Inventory;
+using FogHarbor.Items;
+using FogHarbor.Relationship;
 
 namespace FogHarbor.Quest
 {
@@ -32,9 +35,8 @@ namespace FogHarbor.Quest
 
         private void Awake()
         {
-            inventory = GetComponent<InventorySystem>();
-            if (inventory == null)
-                Debug.LogError("[QuestSystem] 未找到 InventorySystem，请确保两者挂在同一物体上");
+            inventory = GetComponent<InventorySystem>()
+                ?? throw new MissingComponentException("QuestSystem requires InventorySystem on AppRoot.");
 
             LoadAllQuestDefs();
         }
@@ -43,24 +45,59 @@ namespace FogHarbor.Quest
         {
             questDefs.Clear();
             var assets = Resources.LoadAll<QuestData>("Quests");
+            if (assets.Length == 0) throw new InvalidOperationException("Resources/Quests contains no QuestData assets.");
             foreach (var asset in assets)
             {
-                if (!string.IsNullOrEmpty(asset.QuestId))
-                {
-                    questDefs[asset.QuestId] = asset;
-                    // 默认状态为 Available
-                    if (!questStates.ContainsKey(asset.QuestId))
-                        questStates[asset.QuestId] = QuestState.Available;
-                }
+                ValidateDefinition(asset);
+                if (questDefs.ContainsKey(asset.QuestId))
+                    throw new InvalidOperationException($"Duplicate questId '{asset.QuestId}' in Resources/Quests.");
+                questDefs.Add(asset.QuestId, asset);
+                questStates.Add(asset.QuestId, QuestState.Available);
             }
+            if (questDefs.Values.Count(def => def.IsMainQuest) != 1)
+                throw new InvalidOperationException("Exactly one QuestData asset must be marked as the main quest.");
             Debug.Log($"[QuestSystem] 已加载 {questDefs.Count} 个任务定义");
+        }
+
+        private static void ValidateDefinition(QuestData asset)
+        {
+            if (asset == null) throw new InvalidOperationException("Resources/Quests contains a null QuestData asset.");
+            if (string.IsNullOrWhiteSpace(asset.QuestId) || string.IsNullOrWhiteSpace(asset.Title))
+                throw new InvalidOperationException($"QuestData '{asset.name}' requires questId and title.");
+            if (asset.RewardGold < 0)
+                throw new InvalidOperationException($"Quest '{asset.QuestId}' has a negative gold reward.");
+
+            if (!string.IsNullOrEmpty(asset.TargetItemId))
+            {
+                ItemDatabase.GetById(asset.TargetItemId);
+                if (asset.TargetCount <= 0)
+                    throw new InvalidOperationException($"Quest '{asset.QuestId}' requires a positive target count.");
+            }
+            if (asset.AcceptanceItem != null)
+            {
+                if (asset.AcceptanceItemCount <= 0)
+                    throw new InvalidOperationException($"Quest '{asset.QuestId}' has a non-positive acceptance item count.");
+                if (ItemDatabase.GetById(asset.AcceptanceItem.ItemId) != asset.AcceptanceItem)
+                    throw new InvalidOperationException($"Quest '{asset.QuestId}' acceptance item does not match the item database.");
+            }
+            if (!string.IsNullOrEmpty(asset.RewardItemId))
+            {
+                ItemDatabase.GetById(asset.RewardItemId);
+                if (asset.RewardItemCount <= 0)
+                    throw new InvalidOperationException($"Quest '{asset.QuestId}' has a reward item with a non-positive count.");
+            }
+            else if (asset.RewardItemCount != 0)
+            {
+                throw new InvalidOperationException($"Quest '{asset.QuestId}' has a reward count without a reward item.");
+            }
         }
 
         // ─── 状态查询 ───
 
         public QuestState GetState(string questId)
         {
-            return questStates.TryGetValue(questId, out var state) ? state : QuestState.Available;
+            if (questStates.TryGetValue(questId, out var state)) return state;
+            throw new KeyNotFoundException($"Quest state is not registered for questId '{questId}'.");
         }
 
         public QuestData GetQuest(string questId)
@@ -74,30 +111,37 @@ namespace FogHarbor.Quest
             return questStates.Keys;
         }
 
-        /// <summary>主任务 ID（IsMainQuest 标记的任务；无标记则回退第一个）。替代代码里写死 main_001。</summary>
+        public void ValidateNpcReferences(RelationshipSystem relationships)
+        {
+            if (relationships == null) throw new ArgumentNullException(nameof(relationships));
+            foreach (var def in questDefs.Values)
+                if (!string.IsNullOrEmpty(def.RewardNpcId) && relationships.GetProfile(def.RewardNpcId) == null)
+                    throw new InvalidOperationException($"Quest '{def.QuestId}' references unknown reward NPC '{def.RewardNpcId}'.");
+        }
+
+        /// <summary>主任务 ID（由唯一一个 IsMainQuest 标记的数据资产决定）。</summary>
         public string GetMainQuestId()
         {
             foreach (var def in questDefs.Values)
                 if (def.IsMainQuest) return def.QuestId;
-            foreach (var id in questDefs.Keys)
-                return id;
-            return null;
+            throw new InvalidOperationException("No QuestData asset is marked as the main quest.");
         }
 
         /// <summary>检查任务是否可完成：状态为 Accepted 且背包中有足够目标物品。</summary>
         public bool CanComplete(string questId)
         {
-            if (!questDefs.TryGetValue(questId, out var def)) return false;
+            if (!questDefs.TryGetValue(questId, out var def))
+                throw new KeyNotFoundException($"Quest '{questId}' is not registered.");
             if (GetState(questId) != QuestState.Accepted) return false;
             if (string.IsNullOrEmpty(def.TargetItemId)) return true;
-            return inventory != null && inventory.Has(def.TargetItemId, def.TargetCount);
+            return inventory.Has(def.TargetItemId, def.TargetCount);
         }
 
         /// <summary>物品入库后推进任务（系统层规则）：把目标物为 itemId 且已满足条件的
         /// Accepted 任务置为 Completed。由 GameSession 拾取用例调用。</summary>
         public void TryCompleteOnPickup(string itemId)
         {
-            if (string.IsNullOrEmpty(itemId)) return;
+            if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required.", nameof(itemId));
             foreach (var def in questDefs.Values)
             {
                 if (def.TargetItemId != itemId) continue;
@@ -112,10 +156,7 @@ namespace FogHarbor.Quest
         public bool Accept(string questId)
         {
             if (!questDefs.ContainsKey(questId))
-            {
-                Debug.LogWarning($"[QuestSystem] 未找到任务: {questId}");
-                return false;
-            }
+                throw new KeyNotFoundException($"Quest '{questId}' is not registered.");
 
             if (GetState(questId) != QuestState.Available)
             {
@@ -145,7 +186,8 @@ namespace FogHarbor.Quest
         /// <summary>只读预检：任务是否已完成且可领奖（Completed 且未 Rewarded）。流程编排层取前校验。</summary>
         public bool CanClaimReward(string questId)
         {
-            return questDefs.ContainsKey(questId) && GetState(questId) == QuestState.Completed;
+            if (!questDefs.ContainsKey(questId)) throw new KeyNotFoundException($"Quest '{questId}' is not registered.");
+            return GetState(questId) == QuestState.Completed;
         }
 
         /// <summary>领取奖励：Completed → Rewarded。纯状态机推进，不处理消耗/发奖
@@ -153,10 +195,7 @@ namespace FogHarbor.Quest
         public bool ClaimReward(string questId)
         {
             if (!questDefs.TryGetValue(questId, out var def))
-            {
-                Debug.LogWarning($"[QuestSystem] 未找到任务: {questId}");
-                return false;
-            }
+                throw new KeyNotFoundException($"Quest '{questId}' is not registered.");
 
             if (GetState(questId) != QuestState.Completed)
             {
@@ -173,6 +212,8 @@ namespace FogHarbor.Quest
 
         private void SetState(string questId, QuestState newState)
         {
+            if (!questDefs.ContainsKey(questId)) throw new KeyNotFoundException($"Quest '{questId}' is not registered.");
+            if (!Enum.IsDefined(typeof(QuestState), newState)) throw new ArgumentOutOfRangeException(nameof(newState));
             questStates[questId] = newState;
             OnQuestStateChanged?.Invoke(questId, newState);
         }
@@ -195,27 +236,25 @@ namespace FogHarbor.Quest
 
         public void LoadFromData(Dictionary<string, QuestState> data)
         {
-            questStates.Clear();
-            if (data == null)
-            {
-                // 没有存档，全部设为 Available
-                foreach (var questId in questDefs.Keys)
-                    questStates[questId] = QuestState.Available;
-                return;
-            }
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            var restored = new Dictionary<string, QuestState>();
 
             foreach (var pair in data)
             {
-                if (questDefs.ContainsKey(pair.Key))
-                    questStates[pair.Key] = pair.Value;
+                if (!questDefs.ContainsKey(pair.Key))
+                    throw new KeyNotFoundException($"Save data references unknown questId '{pair.Key}'.");
+                restored.Add(pair.Key, pair.Value);
             }
 
             // 新任务（存档中没有的）默认 Available
             foreach (var questId in questDefs.Keys)
             {
-                if (!questStates.ContainsKey(questId))
-                    questStates[questId] = QuestState.Available;
+                if (!restored.ContainsKey(questId))
+                    restored.Add(questId, QuestState.Available);
             }
+
+            questStates.Clear();
+            foreach (var pair in restored) questStates.Add(pair.Key, pair.Value);
 
             Debug.Log($"[QuestSystem] 从存档恢复 {questStates.Count} 个任务状态");
             foreach (var pair in questStates) OnQuestStateChanged?.Invoke(pair.Key, pair.Value);

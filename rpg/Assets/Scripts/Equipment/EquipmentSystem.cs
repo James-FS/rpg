@@ -53,45 +53,27 @@ namespace FogHarbor.Equipment
 
         private void Awake()
         {
-            // InventorySystem 挂在同一个 AppRoot 上，直接获取
-            inventory = GetComponent<InventorySystem>();
-            if (inventory == null)
-                Debug.LogError("[EquipmentSystem] 未找到 InventorySystem，请确保两者挂在同一物体上");
-        }
-
-        private void OnEnable() => UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
-        private void OnDisable() => UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
-
-        private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
-        {
-            // PlayerController 在场景物体上，AppRoot 跨场景保留——场景切换后重新绑定并应用加成。
-            player = UnityEngine.Object.FindObjectOfType<PlayerController>();
-            ApplyStatsToPlayer();
-        }
-
-        private void Start()
-        {
-            // 兜底绑定：直接 Play（场景已加载，sceneLoaded 不触发）时也能拿到 PlayerController。
-            if (player == null)
-                player = UnityEngine.Object.FindObjectOfType<PlayerController>();
-            RecalculateStats();
-            ApplyStatsToPlayer();
+            inventory = GetComponent<InventorySystem>()
+                ?? throw new MissingComponentException("EquipmentSystem requires InventorySystem on AppRoot.");
         }
 
         /// <summary>手动绑定 PlayerController（供外部注入；通常由 OnSceneLoaded 自动完成）。</summary>
         public void SetPlayer(PlayerController pc)
         {
-            player = pc;
+            player = pc ?? throw new ArgumentNullException(nameof(pc));
+            if (player.GetComponent<PlayerWeaponVisual>() is { } weaponVisual)
+                weaponVisual.BindEquipment(this);
             ApplyStatsToPlayer();
         }
+
+        public void ClearPlayer() => player = null;
 
         // ─── 穿戴 / 脱下 ───
 
         /// <summary>穿戴装备：从背包移除物品并放入对应槽位，已有装备退回背包。</summary>
         public bool Equip(string itemId)
         {
-            var itemData = ItemDatabase.GetById(itemId);
-            if (itemData == null) return false;
+            if (!ItemDatabase.TryGetById(itemId, out var itemData)) return false;
 
             if (itemData.Type != ItemType.Weapon && itemData.Type != ItemType.Armor)
             {
@@ -99,7 +81,7 @@ namespace FogHarbor.Equipment
                 return false;
             }
 
-            if (inventory == null || !inventory.Has(itemId, 1))
+            if (!inventory.Has(itemId, 1))
             {
                 Debug.LogWarning($"[Equipment] 背包中没有 {itemId}，无法装备");
                 return false;
@@ -143,8 +125,7 @@ namespace FogHarbor.Equipment
                 return false;
             }
 
-            if (inventory != null)
-                inventory.Add(currentId, 1);
+            inventory.Add(currentId, 1);
 
             if (slot == EquipSlot.Weapon)
                 weaponId = "";
@@ -177,24 +158,18 @@ namespace FogHarbor.Equipment
 
             if (!string.IsNullOrEmpty(weaponId))
             {
-                var data = ItemDatabase.GetById(weaponId);
-                if (data != null) bonusAttack += data.Attack;
+                bonusAttack += ItemDatabase.GetById(weaponId).Attack;
             }
 
             if (!string.IsNullOrEmpty(armorId))
             {
-                var data = ItemDatabase.GetById(armorId);
-                if (data != null) bonusDefense += data.Defense;
+                bonusDefense += ItemDatabase.GetById(armorId).Defense;
             }
         }
 
         private void ApplyStatsToPlayer()
         {
-            if (player == null)
-            {
-                Debug.Log($"[Equipment] 玩家未绑定，加成暂未应用（ATK+{bonusAttack} DEF+{bonusDefense}）");
-                return;
-            }
+            if (player == null) throw new InvalidOperationException("Equipment stats cannot be applied before GameSession binds the player.");
 
             // 真正写回玩家属性（T2 遗留补全：装备加成参与战斗）
             player.SetAttackBonus(bonusAttack);
@@ -215,8 +190,9 @@ namespace FogHarbor.Equipment
 
         public void LoadFromData(EquipmentSaveData data)
         {
-            weaponId = data?.weapon ?? "";
-            armorId = data?.armor ?? "";
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            weaponId = data.weapon ?? "";
+            armorId = data.armor ?? "";
             RecalculateStats();
             ApplyStatsToPlayer();
             OnEquipmentChanged?.Invoke();

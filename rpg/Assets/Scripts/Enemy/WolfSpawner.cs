@@ -37,11 +37,10 @@ namespace FogHarbor.Enemy
 
         private void Awake()
         {
-            if (wolfPrefab == null)
-            {
-                Debug.LogError("[WolfSpawner] 未指定 wolfPrefab！");
-                return;
-            }
+            if (wolfPrefab == null) throw new MissingReferenceException("WolfSpawner requires wolfPrefab.");
+            if (maxWolves <= 0 || initialWolves < 0 || initialWolves > maxWolves)
+                throw new System.InvalidOperationException("WolfSpawner requires 0 <= initialWolves <= maxWolves and maxWolves > 0.");
+            if (respawnInterval <= 0f) throw new System.InvalidOperationException("WolfSpawner respawnInterval must be positive.");
 
             // 预热对象池：实例化上限只，全部隐藏
             for (int i = 0; i < maxWolves; i++)
@@ -53,23 +52,18 @@ namespace FogHarbor.Enemy
                 pool.Add(wolf);
             }
 
-            // 初始刷出
-            for (int i = 0; i < initialWolves && i < maxWolves; i++)
-                SpawnOne();
-
-            Debug.Log($"[WolfSpawner] 预热 {pool.Count} 只（池），初始活跃 {active.Count} 只");
         }
 
         private void Start()
         {
-            var pc = Object.FindObjectOfType<FogHarbor.Player.PlayerController>();
-            if (pc != null) player = pc.transform;
+            player = (FogHarbor.Session.GameSession.Instance
+                ?? throw new MissingComponentException("WolfSpawner requires a composed GameSession.")).Player.transform;
+            for (int i = 0; i < initialWolves; i++) SpawnOne();
+            Debug.Log($"[WolfSpawner] 预热 {pool.Count + active.Count} 只（池），初始活跃 {active.Count} 只");
         }
 
         private void Update()
         {
-            if (wolfPrefab == null) return;
-
             // 活跃数低于上限 → 计时补刷
             if (active.Count < maxWolves)
             {
@@ -85,7 +79,7 @@ namespace FogHarbor.Enemy
         /// <summary>从池取一只放到区域内随机点并激活；池空则跳过。</summary>
         private void SpawnOne()
         {
-            if (pool.Count == 0 || wolfPrefab == null) return;
+            if (pool.Count == 0) throw new System.InvalidOperationException("WolfSpawner pool is empty below its active limit.");
 
             // 取池尾
             var wolf = pool[pool.Count - 1];
@@ -110,11 +104,8 @@ namespace FogHarbor.Enemy
                 // 落点不能是地面以下（村庄没有坑，简单 clamp 到地面 0.1）
                 pos.y = 0.1f;
 
-                if (player != null)
-                {
-                    float dist = Vector3.Distance(pos, player.position);
-                    if (dist < minRespawnDistanceFromPlayer) continue;
-                }
+                float dist = Vector3.Distance(pos, player.position);
+                if (dist < minRespawnDistanceFromPlayer) continue;
                 return pos;
             }
             return Vector3.zero;

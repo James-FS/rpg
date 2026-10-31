@@ -11,7 +11,7 @@
       "url": "https://packages.tuanjie.cn"
     },
     "com.aibot.npcagent": {
-      "version": "file:D:/Code/aibot/Packages/com.aibot.npcagent",
+      "version": "file:../../../aibot/Packages/com.aibot.npcagent",
       "depth": 0,
       "source": "local",
       "dependencies": {

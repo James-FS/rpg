@@ -9,9 +9,32 @@ using FogHarbor.Equipment;
 using FogHarbor.Player;
 using FogHarbor.Quest;
 using FogHarbor.Relationship;
+using FogHarbor.Items;
 
 namespace FogHarbor.Save
 {
+    public enum SaveLoadStatus
+    {
+        NoSave,
+        Loaded,
+        RecoveredFromBackup,
+        Corrupt
+    }
+
+    public readonly struct SaveLoadResult
+    {
+        public readonly SaveLoadStatus Status;
+        public readonly SaveSystem.SaveData Data;
+        public readonly string Error;
+
+        public SaveLoadResult(SaveLoadStatus status, SaveSystem.SaveData data = null, string error = null)
+        {
+            Status = status;
+            Data = data;
+            Error = error;
+        }
+    }
+
     /// <summary>
     /// 存档系统：将所有游戏状态序列化为 JSON，安全写入磁盘。
     /// 挂载在 AppRoot 上，通过 DontDestroyOnLoad 跨场景保留。
@@ -53,17 +76,16 @@ namespace FogHarbor.Save
 
         private void Awake()
         {
-            inventory = GetComponent<InventorySystem>();
-            equipment = GetComponent<EquipmentSystem>();
-            questSystem = GetComponent<QuestSystem>();
-            rewardService = GetComponent<RewardService>();
-            relationshipSystem = GetComponent<RelationshipSystem>();
-
-            if (inventory == null) Debug.LogError("[SaveSystem] 未找到 InventorySystem");
-            if (equipment == null) Debug.LogError("[SaveSystem] 未找到 EquipmentSystem");
-            if (questSystem == null) Debug.LogError("[SaveSystem] 未找到 QuestSystem");
-            if (rewardService == null) Debug.LogError("[SaveSystem] 未找到 RewardService");
-            if (relationshipSystem == null) Debug.LogError("[SaveSystem] 未找到 RelationshipSystem");
+            inventory = GetComponent<InventorySystem>()
+                ?? throw new MissingComponentException("SaveSystem requires InventorySystem on AppRoot.");
+            equipment = GetComponent<EquipmentSystem>()
+                ?? throw new MissingComponentException("SaveSystem requires EquipmentSystem on AppRoot.");
+            questSystem = GetComponent<QuestSystem>()
+                ?? throw new MissingComponentException("SaveSystem requires QuestSystem on AppRoot.");
+            rewardService = GetComponent<RewardService>()
+                ?? throw new MissingComponentException("SaveSystem requires RewardService on AppRoot.");
+            relationshipSystem = GetComponent<RelationshipSystem>()
+                ?? throw new MissingComponentException("SaveSystem requires RelationshipSystem on AppRoot.");
         }
 
         // ─── 存档数据结构 ───
@@ -98,22 +120,26 @@ namespace FogHarbor.Save
         /// <summary>保存游戏状态到磁盘。</summary>
         public bool Save(PlayerController player = null)
         {
-            try { return WriteSnapshot(Capture(player)); }
-            catch (Exception ex) { return ReportFailure(ex); }
+            return WriteSnapshot(Capture(player));
         }
 
         public SaveData Capture(PlayerController player = null)
         {
-            if (player == null) player = FindObjectOfType<PlayerController>();
+            if (player == null)
+                player = (GameSession.Instance
+                    ?? throw new MissingComponentException("SaveSystem requires a composed GameSession.")).Player;
+            if (player == null)
+                throw new InvalidOperationException("Cannot capture a gameplay save without a bound PlayerController.");
+
             var data = new SaveData
             {
                 gold = rewardService.GetSaveGold(),
-                hasLocation = player != null && IsGameplayScene(player.gameObject.scene.name),
-                sceneName = player != null ? player.gameObject.scene.name : null,
-                playerPosition = player != null ? player.transform.position : Vector3.zero,
-                playerYaw = player != null ? player.transform.eulerAngles.y : 0,
-                hp = player != null ? player.CurrentHp : 100,
-                maxHp = player != null ? player.MaxHp : 100,
+                hasLocation = IsGameplayScene(player.gameObject.scene.name),
+                sceneName = player.gameObject.scene.name,
+                playerPosition = player.transform.position,
+                playerYaw = player.transform.eulerAngles.y,
+                hp = player.CurrentHp,
+                maxHp = player.MaxHp,
                 inventory = inventory.GetSaveData(),
                 starterItemGrants = inventory.GetStarterItemGrants(),
                 equipment = equipment.GetSaveData(),
@@ -136,19 +162,32 @@ namespace FogHarbor.Save
 
         private bool WriteSnapshot(SaveData data)
         {
+            if (!Validate(data)) throw new InvalidDataException("The captured save snapshot violates the save schema.");
+            ValidateContentReferences(data);
+            string json = JsonUtility.ToJson(data, true);
+            if (!Validate(JsonUtility.FromJson<SaveData>(json)))
+                throw new InvalidDataException("The serialized save snapshot failed validation.");
+
             try
             {
-                if (!Validate(data)) throw new InvalidDataException("Invalid save snapshot.");
                 Directory.CreateDirectory(SaveDir);
-                string json = JsonUtility.ToJson(data, true);
                 File.WriteAllText(TmpPath, json);
-                if (!Validate(JsonUtility.FromJson<SaveData>(json))) throw new InvalidDataException("Save verification failed.");
                 if (File.Exists(SavePath)) File.Replace(TmpPath, SavePath, BakPath);
                 else File.Move(TmpPath, SavePath);
             }
-            catch (Exception ex)
+            catch (IOException ex)
             {
-                try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch (IOException) { }
+                DeleteTemporaryAfterFailure();
+                return ReportFailure(ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                DeleteTemporaryAfterFailure();
+                return ReportFailure(ex);
+            }
+            catch (PlatformNotSupportedException ex)
+            {
+                DeleteTemporaryAfterFailure();
                 return ReportFailure(ex);
             }
             Debug.Log("[SaveSystem] 存档已保存: " + SavePath);
@@ -157,10 +196,22 @@ namespace FogHarbor.Save
             return true;
         }
 
+        private void DeleteTemporaryAfterFailure()
+        {
+            if (!File.Exists(TmpPath)) return;
+            try { File.Delete(TmpPath); }
+            catch (IOException cleanupError) { Debug.LogException(cleanupError); }
+            catch (UnauthorizedAccessException cleanupError) { Debug.LogException(cleanupError); }
+        }
+
         private bool ReportFailure(Exception ex)
         {
-            Debug.LogError("[SaveSystem] 存档失败: " + ex.Message);
-            return PublishResult(false);
+            Debug.LogException(ex);
+            LastSaveSucceeded = false;
+            LastSaveMessage = "存档失败：" + ex.Message;
+            LastSaveTime = Time.unscaledTime;
+            try { OnSaveResult?.Invoke(false, LastSaveMessage); } catch (Exception eventError) { Debug.LogException(eventError); }
+            return false;
         }
         private bool PublishResult(bool success)
         {
@@ -173,9 +224,14 @@ namespace FogHarbor.Save
         public static bool IsGameplayScene(string name) => name == "Town" || name == "Forest";
         public string GetResumeScene(string fallback)
         {
-            var data = Load();
-            return data != null && data.hasLocation && IsGameplayScene(data.sceneName)
-                && Application.CanStreamedLevelBeLoaded(data.sceneName) ? data.sceneName : fallback;
+            var result = Load();
+            if (result.Status == SaveLoadStatus.Corrupt)
+                throw new InvalidDataException("存档与备份均无法读取：" + result.Error);
+            if (result.Status == SaveLoadStatus.NoSave || !result.Data.hasLocation)
+                return fallback;
+            if (!Application.CanStreamedLevelBeLoaded(result.Data.sceneName))
+                throw new InvalidDataException($"存档场景 '{result.Data.sceneName}' 未加入 Build Settings。");
+            return result.Data.sceneName;
         }
         private bool quitSaved;
         private void OnEnable() { Application.wantsToQuit += BeforeQuit; }
@@ -185,8 +241,8 @@ namespace FogHarbor.Save
         private void OnApplicationPause(bool paused) { if (paused) SaveOnLifecycleEvent(); }
         private bool SaveOnLifecycleEvent()
         {
-            var session = GetComponent<GameSession>();
-            var player = FindObjectOfType<PlayerController>();
+            var session = GameSession.Instance;
+            var player = session != null ? session.Player : null;
             if (session != null && session.IsReadyToSave && player != null && IsGameplayScene(player.gameObject.scene.name))
                 return Save(player);
             return true;
@@ -194,88 +250,96 @@ namespace FogHarbor.Save
 
         // ─── 读取 ───
 
-        /// <summary>从磁盘加载存档，返回 null 表示无存档。</summary>
-        public SaveData Load()
+        /// <summary>Reads the primary save, then the backup. Corruption is distinct from a new game.</summary>
+        public SaveLoadResult Load()
         {
-            if (!File.Exists(SavePath))
+            bool hasMain = File.Exists(SavePath);
+            bool hasBackup = File.Exists(BakPath);
+            if (!hasMain && !hasBackup)
             {
-                if (File.Exists(BakPath))
-                {
-                    Debug.LogWarning("[SaveSystem] 主存档不存在，尝试从备份恢复");
-                    return LoadBackup();
-                }
-
                 Debug.Log("[SaveSystem] 无存档文件，将以新游戏启动");
-                return null;
+                return new SaveLoadResult(SaveLoadStatus.NoSave);
             }
 
-            try
+            string mainError = null;
+            if (hasMain)
             {
-                string json = File.ReadAllText(SavePath);
-                var data = JsonUtility.FromJson<SaveData>(json);
-
-                if (!Validate(data))
+                if (TryReadValidatedFile(SavePath, out var data, out mainError))
                 {
-                    Debug.LogWarning("[SaveSystem] 存档版本不匹配或损坏，尝试加载备份");
-                    return LoadBackup();
+                    Debug.Log("[SaveSystem] 存档已加载");
+                    return new SaveLoadResult(SaveLoadStatus.Loaded, data);
                 }
+                Debug.LogWarning($"[SaveSystem] 主存档不可用，尝试备份恢复：{mainError}");
+            }
 
-                Debug.Log("[SaveSystem] 存档已加载");
-                return data;
-            }
-            catch (Exception e)
+            if (hasBackup)
             {
-                Debug.LogError($"[SaveSystem] 读取存档失败: {e.Message}，尝试加载备份");
-                return LoadBackup();
+                if (TryReadValidatedFile(BakPath, out var backup, out var backupError))
+                {
+                    Debug.LogWarning("[SaveSystem] 从备份恢复成功");
+                    return new SaveLoadResult(SaveLoadStatus.RecoveredFromBackup, backup, mainError);
+                }
+                string error = $"主存档：{mainError ?? "不存在"}；备份：{backupError}";
+                Debug.LogError("[SaveSystem] 主存档与备份均不可用：" + error);
+                return new SaveLoadResult(SaveLoadStatus.Corrupt, error: error);
             }
+
+            string mainOnlyError = mainError ?? "主存档不可读";
+            Debug.LogError("[SaveSystem] 主存档不可用且没有备份：" + mainOnlyError);
+            return new SaveLoadResult(SaveLoadStatus.Corrupt, error: mainOnlyError);
         }
 
-        private SaveData LoadBackup()
+        private bool TryReadValidatedFile(string path, out SaveData data, out string error)
         {
-            if (!File.Exists(BakPath))
-            {
-                Debug.LogWarning("[SaveSystem] 无备份文件");
-                return null;
-            }
-
+            data = null;
+            error = null;
             try
             {
-                string json = File.ReadAllText(BakPath);
-                var data = JsonUtility.FromJson<SaveData>(json);
+                data = Migrate(JsonUtility.FromJson<SaveData>(File.ReadAllText(path)));
                 if (!Validate(data))
                 {
-                    Debug.LogError("[SaveSystem] 备份版本不匹配或内容损坏");
-                    return null;
+                    error = "内容或版本不符合存档格式";
+                    data = null;
+                    return false;
                 }
-
-                Debug.Log("[SaveSystem] 从备份加载成功");
-                return data;
+                ValidateContentReferences(data);
+                return true;
             }
-            catch (Exception e)
-            {
-                Debug.LogError($"[SaveSystem] 备份加载也失败: {e.Message}");
-                return null;
-            }
+            catch (IOException ex) { error = ex.Message; }
+            catch (UnauthorizedAccessException ex) { error = ex.Message; }
+            catch (ArgumentException ex) { error = ex.Message; }
+            catch (InvalidDataException ex) { error = ex.Message; }
+            data = null;
+            return false;
         }
 
         /// <summary>加载存档并恢复所有系统状态。由 GameSession 在启动首次进入游戏场景时调用。</summary>
-        public bool LoadAndApply(PlayerController player = null)
+        public SaveLoadResult LoadAndApply(PlayerController player = null)
         {
-            var data = Load();
-            if (data == null)
+            var result = Load();
+            if (result.Status == SaveLoadStatus.NoSave)
             {
                 Debug.Log("[SaveSystem] 新游戏，无需恢复");
                 OnLoadComplete?.Invoke();
-                return false;
+                return result;
             }
 
-            return Apply(data, player);
+            if (result.Status == SaveLoadStatus.Corrupt)
+                throw new InvalidDataException("存档与备份均无法读取：" + result.Error);
+
+            Apply(result.Data, player);
+            return result;
         }
 
-        public bool Apply(SaveData data, PlayerController player = null)
+        public void Apply(SaveData data, PlayerController player = null)
         {
-            if (!Validate(data)) return false;
-            if (player == null) player = FindObjectOfType<PlayerController>();
+            data = Migrate(data);
+            if (!Validate(data)) throw new InvalidDataException("Cannot apply an invalid save snapshot.");
+            ValidateContentReferences(data);
+            if (player == null)
+                player = (GameSession.Instance
+                    ?? throw new MissingComponentException("SaveSystem requires a composed GameSession.")).Player;
+            if (player == null) throw new InvalidOperationException("Cannot apply a gameplay save without a bound PlayerController.");
             // 恢复金币
             rewardService.LoadGold(data.gold);
 
@@ -288,13 +352,9 @@ namespace FogHarbor.Save
 
             // 恢复任务状态
             var questDict = new Dictionary<string, QuestState>();
-            if (data.quests != null)
+            foreach (var entry in data.quests)
             {
-                foreach (var entry in data.quests)
-                {
-                    if (Enum.TryParse<QuestState>(entry.state, out var state))
-                        questDict[entry.questId] = state;
-                }
+                questDict[entry.questId] = (QuestState)Enum.Parse(typeof(QuestState), entry.state);
             }
             questSystem.LoadFromData(questDict);
 
@@ -302,39 +362,95 @@ namespace FogHarbor.Save
             relationshipSystem.LoadFromData(data.relationships);
 
             // 恢复玩家 HP
-            if (player != null)
-            {
-                player.RestoreHealth(data.hp, data.maxHp);
-                if (data.hasLocation && data.sceneName == player.gameObject.scene.name)
-                    player.RestorePose(data.playerPosition, data.playerYaw);
-                Debug.Log($"[SaveSystem] 玩家 HP 已恢复: {data.hp}/{data.maxHp}");
-            }
+            player.RestoreHealth(data.hp, data.maxHp);
+            if (data.hasLocation && data.sceneName == player.gameObject.scene.name)
+                player.RestorePose(data.playerPosition, data.playerYaw);
+            Debug.Log($"[SaveSystem] 玩家 HP 已恢复: {data.hp}/{data.maxHp}");
 
             Debug.Log("[SaveSystem] 所有系统状态已恢复");
             OnLoadComplete?.Invoke();
-            return true;
         }
 
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value) && Mathf.Abs(value) <= 100000f;
 
+        private static SaveData Migrate(SaveData data)
+        {
+            if (data == null) return null;
+            if (data.version == 1)
+            {
+                data.equipment ??= new EquipmentSystem.EquipmentSaveData();
+                data.starterItemGrants ??= new List<string>();
+                data.version = SAVE_VERSION;
+            }
+            return data;
+        }
+
+        private void ValidateContentReferences(SaveData data)
+        {
+            foreach (var entry in data.inventory)
+                if (!ItemDatabase.TryGetById(entry.itemId, out _))
+                    throw new InvalidDataException($"Save inventory references unknown item '{entry.itemId}'.");
+
+            if (data.starterItemGrants != null)
+                foreach (string itemId in data.starterItemGrants)
+                    if (!ItemDatabase.TryGetById(itemId, out _))
+                        throw new InvalidDataException($"Save starter grants reference unknown item '{itemId}'.");
+
+            if (!string.IsNullOrEmpty(data.equipment.weapon))
+            {
+                if (!ItemDatabase.TryGetById(data.equipment.weapon, out var weapon))
+                    throw new InvalidDataException($"Save weapon slot references unknown item '{data.equipment.weapon}'.");
+                if (weapon.Type != ItemType.Weapon)
+                    throw new InvalidDataException($"Save weapon slot references non-weapon item '{data.equipment.weapon}'.");
+            }
+            if (!string.IsNullOrEmpty(data.equipment.armor))
+            {
+                if (!ItemDatabase.TryGetById(data.equipment.armor, out var armor))
+                    throw new InvalidDataException($"Save armor slot references unknown item '{data.equipment.armor}'.");
+                if (armor.Type != ItemType.Armor)
+                    throw new InvalidDataException($"Save armor slot references non-armor item '{data.equipment.armor}'.");
+            }
+
+            foreach (var entry in data.quests)
+                if (questSystem.GetQuest(entry.questId) == null)
+                    throw new InvalidDataException($"Save data references unknown quest '{entry.questId}'.");
+
+            if (data.relationships != null)
+                foreach (var entry in data.relationships)
+                    if (relationshipSystem.GetProfile(entry.npcId) == null)
+                        throw new InvalidDataException($"Save data references unknown NPC '{entry.npcId}'.");
+        }
+
         public static bool Validate(SaveData data)
         {
-            if (data == null || (data.version != 1 && data.version != SAVE_VERSION) || data.gold < 0
+            if (data == null || data.version != SAVE_VERSION || data.gold < 0
                 || data.maxHp <= 0 || data.hp < 0 || data.hp > data.maxHp
-                || data.inventory == null || data.quests == null) return false;
+                || data.inventory == null || data.quests == null || data.equipment == null) return false;
             if (data.hasLocation && (!IsGameplayScene(data.sceneName)
                 || !Finite(data.playerPosition.x) || !Finite(data.playerPosition.y) || !Finite(data.playerPosition.z)
                 || !Finite(data.playerYaw))) return false;
+            var questIds = new HashSet<string>();
             foreach (var entry in data.quests)
                 if (entry == null || string.IsNullOrEmpty(entry.questId)
                     || !Enum.TryParse<QuestState>(entry.state, out var state)
-                    || !Enum.IsDefined(typeof(QuestState), state)) return false;
+                    || !Enum.IsDefined(typeof(QuestState), state) || !questIds.Add(entry.questId)) return false;
+            var inventoryIds = new HashSet<string>();
             foreach (var entry in data.inventory)
-                if (entry == null || string.IsNullOrEmpty(entry.itemId) || entry.count < 0) return false;
+                if (entry == null || string.IsNullOrEmpty(entry.itemId) || entry.count <= 0
+                    || !inventoryIds.Add(entry.itemId)) return false;
+            if (data.starterItemGrants != null)
+            {
+                var grantIds = new HashSet<string>();
+                foreach (string itemId in data.starterItemGrants)
+                    if (string.IsNullOrEmpty(itemId) || !grantIds.Add(itemId)) return false;
+            }
             // Older version-1 saves predate relationships; null restores initial NPC favor.
             if (data.relationships != null)
+            {
+                var npcIds = new HashSet<string>();
                 foreach (var entry in data.relationships)
-                    if (entry == null || string.IsNullOrEmpty(entry.npcId) || entry.favor < 0) return false;
+                    if (entry == null || string.IsNullOrEmpty(entry.npcId) || entry.favor < 0 || !npcIds.Add(entry.npcId)) return false;
+            }
             return true;
         }
 

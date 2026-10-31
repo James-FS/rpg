@@ -23,24 +23,34 @@ namespace FogHarbor.Items
             var assets = Resources.LoadAll<ItemData>("Items");
             foreach (var asset in assets)
             {
-                if (!string.IsNullOrEmpty(asset.ItemId))
-                {
-                    lookup[asset.ItemId] = asset;
-                }
+                if (asset == null) throw new System.InvalidOperationException("Resources/Items contains a null ItemData asset.");
+                if (string.IsNullOrWhiteSpace(asset.ItemId))
+                    throw new System.InvalidOperationException($"ItemData '{asset.name}' has no itemId.");
+                if (lookup.ContainsKey(asset.ItemId))
+                    throw new System.InvalidOperationException($"Duplicate itemId '{asset.ItemId}' in Resources/Items.");
+                lookup.Add(asset.ItemId, asset);
             }
             Debug.Log($"[ItemDatabase] 已加载 {lookup.Count} 个物品定义");
         }
 
         public static ItemData GetById(string itemId)
         {
-            if (lookup.TryGetValue(itemId, out var data))
-                return data;
-
-            Debug.LogWarning($"[ItemDatabase] 未找到物品: {itemId}");
-            return null;
+            if (string.IsNullOrWhiteSpace(itemId)) throw new System.ArgumentException("itemId is required.", nameof(itemId));
+            if (lookup.TryGetValue(itemId, out var data)) return data;
+            throw new KeyNotFoundException($"No ItemData is registered for itemId '{itemId}'.");
         }
 
-        public static bool Exists(string itemId) => lookup.ContainsKey(itemId);
+        public static bool TryGetById(string itemId, out ItemData data)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                data = null;
+                return false;
+            }
+            return lookup.TryGetValue(itemId, out data);
+        }
+
+        public static bool Exists(string itemId) => !string.IsNullOrWhiteSpace(itemId) && lookup.ContainsKey(itemId);
         public static IEnumerable<ItemData> GetAll() => lookup.Values;
     }
 }

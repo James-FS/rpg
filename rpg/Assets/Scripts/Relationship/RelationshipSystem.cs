@@ -30,10 +30,22 @@ namespace FogHarbor.Relationship
         {
             profiles.Clear();
             var assets = Resources.LoadAll<NpcProfile>("NPCs");
+            if (assets.Length == 0) throw new InvalidOperationException("Resources/NPCs contains no NpcProfile assets.");
             foreach (var p in assets)
             {
-                if (p != null && !string.IsNullOrEmpty(p.NpcId))
-                    profiles[p.NpcId] = p;
+                if (p == null || string.IsNullOrWhiteSpace(p.NpcId) || string.IsNullOrWhiteSpace(p.DisplayName))
+                    throw new InvalidOperationException("Every NPC profile requires npcId and displayName.");
+                if (p.InitialFavor < 0) throw new InvalidOperationException($"NPC '{p.NpcId}' has a negative initial favor.");
+                if (profiles.ContainsKey(p.NpcId)) throw new InvalidOperationException($"Duplicate NPC profile '{p.NpcId}'.");
+                var choiceIds = new HashSet<string>();
+                foreach (var choice in p.Choices)
+                {
+                    if (choice == null || string.IsNullOrWhiteSpace(choice.choiceId))
+                        throw new InvalidOperationException($"NPC '{p.NpcId}' has an invalid choice entry.");
+                    if (!choiceIds.Add(choice.choiceId))
+                        throw new InvalidOperationException($"NPC '{p.NpcId}' has duplicate choiceId '{choice.choiceId}'.");
+                }
+                profiles.Add(p.NpcId, p);
             }
             Debug.Log($"[RelationshipSystem] 已加载 {profiles.Count} 个 NPC 好感配置");
         }
@@ -43,9 +55,10 @@ namespace FogHarbor.Relationship
         /// <summary>当前好感；无记录时返回初始好感。</summary>
         public int GetFavor(string npcId)
         {
-            if (string.IsNullOrEmpty(npcId)) return 0;
+            if (string.IsNullOrWhiteSpace(npcId)) throw new ArgumentException("npcId is required.", nameof(npcId));
             if (favors.TryGetValue(npcId, out int v)) return v;
-            return profiles.TryGetValue(npcId, out var p) ? p.InitialFavor : 0;
+            if (profiles.TryGetValue(npcId, out var p)) return p.InitialFavor;
+            throw new KeyNotFoundException($"NPC profile '{npcId}' is not registered.");
         }
 
         public NpcProfile GetProfile(string npcId)
@@ -72,9 +85,10 @@ namespace FogHarbor.Relationship
         /// <summary>直接增减好感（供未来交易/任务等系统调用；AI 必须走白名单工具）。</summary>
         public void AddFavor(string npcId, int delta)
         {
-            if (string.IsNullOrEmpty(npcId) || delta == 0) return;
+            if (delta == 0) return;
+            if (!profiles.ContainsKey(npcId)) throw new KeyNotFoundException($"NPC profile '{npcId}' is not registered.");
             int current = GetFavor(npcId);
-            favors[npcId] = Mathf.Max(0, current + delta); // 好感不落负数
+            favors[npcId] = Mathf.Max(0, checked(current + delta)); // 好感不落负数
             Debug.Log($"[Relationship] {npcId} 好感 {(delta > 0 ? "+" : "")}{delta} → {favors[npcId]}");
             OnFavorChanged?.Invoke(npcId, favors[npcId]);
         }
@@ -96,8 +110,11 @@ namespace FogHarbor.Relationship
             {
                 foreach (var entry in data)
                 {
-                    if (entry != null && !string.IsNullOrEmpty(entry.npcId))
-                        favors[entry.npcId] = entry.favor;
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.npcId))
+                        throw new InvalidOperationException("Save data contains an invalid NPC relationship entry.");
+                    if (!profiles.ContainsKey(entry.npcId))
+                        throw new KeyNotFoundException($"Save data references unknown NPC '{entry.npcId}'.");
+                    favors[entry.npcId] = entry.favor;
                 }
             }
             Debug.Log($"[Relationship] 从存档恢复 {favors.Count} 个 NPC 好感");

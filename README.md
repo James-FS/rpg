@@ -59,11 +59,11 @@ NPC 对话当前使用 **Server 模式**，不是离线内置模型。项目需�
 
 ## 外部依赖与可移植性
 
-`rpg/Packages/manifest.json` 当前包含一项本机路径依赖：
+`rpg/Packages/manifest.json` 与 `rpg/Packages/packages-lock.json` 使用相对路径引用 AIBot Unity SDK：
 
-- `com.aibot.npcagent` 指向 `D:/Code/aibot/Packages/com.aibot.npcagent`。
+- `com.aibot.npcagent` 指向 `../../../aibot/Packages/com.aibot.npcagent`。
 
-这个目录不随本仓库提供。因此，**从干净克隆无法直接还原完整工程**。其他机器需要先取得兼容版本的 AIBot SDK，再配置可访问的包来源。AIBot Server 也需要单独部署或取得。
+相对路径从 Unity 工程的 `Packages/` 目录解析，因此要求 Unity 工程目录 `D:/Code/rpg/rpg/` 与 AIBot 仓库目录 `D:/Code/aibot/` 保持当前目录关系。AIBot SDK 和 AIBot Server 均由各自仓库提供，因此克隆本仓库后仍需取得这两个外部依赖；移动或打包本工程时要保留上述目录关系，或改用其他可访问的包来源。
 
 项目不再依赖 TJGenerators；此前生成并导入的游戏资源仍保留在 `rpg/Assets/`。`cn.tuanjie.codely.bridge` 仍作为编辑器桥接依赖保留。
 
@@ -85,4 +85,4 @@ NPC 对话当前使用 **Server 模式**，不是离线内置模型。项目需�
 
 - 当前 `ProjectSettings` 中 `companyName` 仍为 `DefaultCompany`、`productName` 为 `rpg`、`bundleVersion` 为 `0.1`；正式构建前应按发行信息设置。
 - 根目录尚无本项目代码的 `LICENSE` 文件。第三方资源的使用与再分发条件需按各自来源确认；`ATTRIBUTIONS.md` 是来源记录，不替代资源授权。
-- 项目目前使用本机路径依赖，未完成可移植的干净克隆还原说明。
+- 项目使用相对的同级仓库依赖，尚未提供独立的 AIBot SDK 镜像或包注册表。

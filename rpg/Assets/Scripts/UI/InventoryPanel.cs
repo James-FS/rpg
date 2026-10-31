@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -82,10 +83,7 @@ namespace FogHarbor.UI
         private static Color Hex(string hex, float alpha = 1f)
         {
             if (!ColorUtility.TryParseHtmlString(hex, out Color c))
-            {
-                Debug.LogWarning($"[InventoryPanel] 颜色解析失败：{hex}");
-                return Color.magenta;
-            }
+                throw new FormatException($"InventoryPanel contains an invalid color literal '{hex}'.");
             c.a = alpha;
             return c;
         }
@@ -105,11 +103,11 @@ namespace FogHarbor.UI
 
         public void Initialize(InventorySystem inv, EquipmentSystem eq)
         {
-            this.inventory = inv;
-            this.equipment = eq;
+            inventory = inv ?? throw new ArgumentNullException(nameof(inv));
+            equipment = eq ?? throw new ArgumentNullException(nameof(eq));
 
-            if (inventory != null) inventory.OnInventoryChanged += RequestRefresh;
-            if (equipment != null) equipment.OnEquipmentChanged += RequestRefresh;  // 装备变化也要刷新列表上的"已装备"标记
+            inventory.OnInventoryChanged += RequestRefresh;
+            equipment.OnEquipmentChanged += RequestRefresh;  // 装备变化也要刷新列表上的"已装备"标记
             Refresh();
         }
 
@@ -142,7 +140,7 @@ namespace FogHarbor.UI
         private void Refresh()
         {
             refreshPending = false;
-            if (!gameObject.activeSelf || inventory == null) return;
+            if (!gameObject.activeSelf) return;
 
             // 物品被用完/丢弃后清空选中（仍穿戴中的物品即使不在背包里也保留选中，便于卸下）
             if (!string.IsNullOrEmpty(selectedItemId) && inventory.GetCount(selectedItemId) <= 0 && !IsEquipped(selectedItemId))
@@ -169,7 +167,7 @@ namespace FogHarbor.UI
             }
 
             // 已装备但不在背包里的物品也要列出（选中后可点"卸下"脱下）
-            if (equipment != null)
+            if (equipment.HasWeapon || equipment.HasArmor)
             {
                 if (equipment.HasWeapon && !listed.Contains(equipment.WeaponId))
                 {
@@ -192,7 +190,7 @@ namespace FogHarbor.UI
         private void CreateItemRow(string itemId, int count)
         {
             var data = ItemDatabase.GetById(itemId);
-            string name = data != null ? data.DisplayName : itemId;
+            string name = data.DisplayName;
             bool isEquipped = IsEquipped(itemId);
 
             var row = CreateRowObject($"Row_{itemId}");
@@ -201,7 +199,7 @@ namespace FogHarbor.UI
 
             // 左侧类型色条：一眼区分武器 / 护甲 / 消耗品 / 材料
             var typeBar = UIHelper.CreateImage("TypeBar", row.transform,
-                data != null ? TypeColor(data.Type) : MUTED);
+                TypeColor(data.Type));
             var barRT = typeBar.GetComponent<RectTransform>();
             barRT.anchorMin = new Vector2(0, 0);
             barRT.anchorMax = new Vector2(0, 1);
@@ -262,7 +260,6 @@ namespace FogHarbor.UI
 
         private bool IsEquipped(string itemId)
         {
-            if (equipment == null) return false;
             return (equipment.HasWeapon && equipment.WeaponId == itemId)
                 || (equipment.HasArmor && equipment.ArmorId == itemId);
         }
@@ -287,15 +284,6 @@ namespace FogHarbor.UI
             }
 
             var data = ItemDatabase.GetById(selectedItemId);
-            if (data == null)
-            {
-                detailNameText.text = selectedItemId;
-                detailMetaText.text = "";
-                detailStatsText.text = "";
-                detailDescText.text = "";
-                return;
-            }
-
             detailNameText.text = data.DisplayName;
             int ownedCount = inventory.GetCount(selectedItemId);
             detailMetaText.text = $"{TypeToString(data.Type)}"
@@ -315,12 +303,19 @@ namespace FogHarbor.UI
         {
             if (equipButton == null) return;
 
-            var data = string.IsNullOrEmpty(selectedItemId) ? null : ItemDatabase.GetById(selectedItemId);
+            if (string.IsNullOrEmpty(selectedItemId))
+            {
+                equipButton.gameObject.SetActive(false);
+                useButton.gameObject.SetActive(false);
+                dropButton.gameObject.SetActive(false);
+                return;
+            }
+            var data = ItemDatabase.GetById(selectedItemId);
 
-            bool equippable = data != null && (data.Type == ItemType.Weapon || data.Type == ItemType.Armor);
+            bool equippable = data.Type == ItemType.Weapon || data.Type == ItemType.Armor;
             equipButton.gameObject.SetActive(equippable);
-            useButton.gameObject.SetActive(data != null && data.Type == ItemType.Consumable);
-            dropButton.gameObject.SetActive(data != null && inventory.GetCount(selectedItemId) > 0);
+            useButton.gameObject.SetActive(data.Type == ItemType.Consumable);
+            dropButton.gameObject.SetActive(inventory.GetCount(selectedItemId) > 0);
 
             // 已装备的物品：按钮变为"卸下"（装备槽里的物品只能从这里脱下）
             if (equippable)
@@ -333,20 +328,20 @@ namespace FogHarbor.UI
 
         private void RefreshEquipInfo()
         {
-            if (equipInfoText == null || equipment == null) return;
+            if (equipInfoText == null) return;
 
             string weaponDisplay = "无";
             if (equipment.HasWeapon)
             {
                 var wData = ItemDatabase.GetById(equipment.WeaponId);
-                weaponDisplay = wData != null ? wData.DisplayName : equipment.WeaponId;
+                weaponDisplay = wData.DisplayName;
             }
 
             string armorDisplay = "无";
             if (equipment.HasArmor)
             {
                 var aData = ItemDatabase.GetById(equipment.ArmorId);
-                armorDisplay = aData != null ? aData.DisplayName : equipment.ArmorId;
+                armorDisplay = aData.DisplayName;
             }
 
             equipInfoText.text =

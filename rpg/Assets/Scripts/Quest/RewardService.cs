@@ -23,24 +23,24 @@ namespace FogHarbor.Quest
 
         private void Awake()
         {
-            inventory = GetComponent<InventorySystem>();
-            if (inventory == null)
-                Debug.LogError("[RewardService] 未找到 InventorySystem，请确保两者挂在同一物体上");
+            inventory = GetComponent<InventorySystem>()
+                ?? throw new MissingComponentException("RewardService requires InventorySystem on AppRoot.");
         }
 
         // ─── 金币 ───
 
         public void AddGold(int amount)
         {
-            if (amount <= 0) return;
-            gold += amount;
+            if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "Gold grants must be positive.");
+            gold = checked(gold + amount);
             OnGoldChanged?.Invoke(gold);
             Debug.Log($"[RewardService] +{amount} 金币（共 {gold}）");
         }
 
         public bool SpendGold(int amount)
         {
-            if (amount <= 0) return true;
+            if (amount < 0) throw new ArgumentOutOfRangeException(nameof(amount), "Gold spend cannot be negative.");
+            if (amount == 0) return true;
             if (gold < amount) return false;
             gold -= amount;
             OnGoldChanged?.Invoke(gold);
@@ -56,11 +56,11 @@ namespace FogHarbor.Quest
         /// </summary>
         public bool GrantQuestReward(QuestData def)
         {
-            if (def == null) return false;
+            if (def == null) throw new ArgumentNullException(nameof(def));
 
             // 1. 只读预检：目标物品是否足够
             if (!string.IsNullOrEmpty(def.TargetItemId) && def.TargetCount > 0
-                && (inventory == null || !inventory.Has(def.TargetItemId, def.TargetCount)))
+                && !inventory.Has(def.TargetItemId, def.TargetCount))
             {
                 Debug.LogWarning($"[RewardService] 发放 {def.QuestId} 奖励失败：目标物品 {def.TargetItemId} 不足");
                 return false;
@@ -70,10 +70,7 @@ namespace FogHarbor.Quest
             if (!string.IsNullOrEmpty(def.TargetItemId) && def.TargetCount > 0)
             {
                 if (!inventory.Remove(def.TargetItemId, def.TargetCount))
-                {
-                    Debug.LogError($"[RewardService] 消耗 {def.TargetItemId} x{def.TargetCount} 失败");
-                    return false;
-                }
+                    throw new InvalidOperationException($"Preflight passed, but consuming {def.TargetItemId} x{def.TargetCount} failed.");
             }
 
             // 3. 发金币
@@ -88,17 +85,10 @@ namespace FogHarbor.Quest
             return true;
         }
 
-        /// <summary>Preflight supplies before advancing the quest state.</summary>
-        public bool CanGrantQuestSupplies(QuestData def)
-        {
-            return def != null && (def.AcceptanceItem == null ||
-                (inventory != null && def.AcceptanceItemCount > 0 &&
-                 !string.IsNullOrEmpty(def.AcceptanceItem.ItemId)));
-        }
-
         /// <summary>Called only after the quest successfully changes to Accepted.</summary>
         public void GrantQuestSupplies(QuestData def)
         {
+            if (def == null) throw new ArgumentNullException(nameof(def));
             if (def.AcceptanceItem != null)
                 inventory.Add(def.AcceptanceItem.ItemId, def.AcceptanceItemCount);
         }

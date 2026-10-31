@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using UnityEngine;
 using AIBot.Core.Tools;
@@ -22,47 +23,24 @@ namespace FogHarbor.Dialogue
         private InventorySystem inventory;
         private GameSession gameSession;
 
-        private void Awake()
-        {
-            // Server 模式不需要本地 data/ 来加载 NPC 配置；但保留兼容路径，
-            // 切回 Local 模式仍可用（避免写死路径又不丢功能）。
-            if (string.IsNullOrEmpty(DevConfigStore.DataRootOverride)
-                && !HasDiscoverableDataRoot())
-            {
-                // 当前开发环境实际的 AIBot 数据目录；发布时改为拷贝 data/ 到 StreamingAssets/aibot
-                if (DevConfigStore.SetDataRoot(@"D:/Code/aibot/data"))
-                {
-                    Debug.Log($"[QuestToolHost] 设置 AIBot 数据根目录: {DevConfigStore.DataRootOverride}");
-                }
-                else
-                {
-                    Debug.LogError("[QuestToolHost] AIBot 数据根目录无效，请在游戏启动配置中设置可移植路径");
-                }
-            }
-        }
-
-        // FindDataRoot logs a warning when it finds nothing. Check the same standard
-        // candidates quietly so the expected development fallback can be applied
-        // without emitting a transient warning during NPC initialization.
-        private static bool HasDiscoverableDataRoot()
-        {
-            string assets = Application.dataPath;
-            return System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "data"))
-                || System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "..", "data"))
-                || System.IO.Directory.Exists(System.IO.Path.Combine(assets, "..", "..", "..", "data"))
-                || System.IO.Directory.Exists(System.IO.Path.Combine(Application.streamingAssetsPath, "aibot"));
-        }
-
         /// <summary>把全部任务工具注册到 NpcAgent（在 Chat 之前调用）。
-        /// 系统引用在此处延迟解析——首次对话时 AppRoot 系统必然已创建。</summary>
+        /// AppRoot 在启动时完成系统组合；此处只读取其明确绑定。</summary>
         public void RegisterTools(NpcAgent agent)
         {
-            questSystem = questSystem ?? FindObjectOfType<QuestSystem>();
-            inventory = inventory ?? FindObjectOfType<InventorySystem>();
-            gameSession = gameSession ?? FindObjectOfType<GameSession>();
+            if (agent == null) throw new ArgumentNullException(nameof(agent));
+            if (agent.connectionProfile == null)
+                throw new MissingComponentException($"NpcAgent '{agent.name}' requires a Server Connection Profile.");
+            if (!agent.connectionProfile.enableGameTools || agent.connectionProfile.enableSimulatedTools)
+                throw new InvalidOperationException($"NpcAgent '{agent.name}' must enable game tools and disable simulated tools.");
+            string[] requiredTools = { "get_quest_status", "accept_quest", "complete_quest", "record_player_choice" };
+            foreach (string toolId in requiredTools)
+                if (agent.connectionProfile.enabledToolIds == null || !agent.connectionProfile.enabledToolIds.Contains(toolId))
+                    throw new InvalidOperationException($"NpcAgent '{agent.name}' profile does not enable required game tool '{toolId}'.");
 
-            if (questSystem == null) Debug.LogWarning("[QuestToolHost] 未找到 QuestSystem，任务工具将不可用");
-            if (gameSession == null) Debug.LogWarning("[QuestToolHost] 未找到 GameSession，流程类工具将不可用");
+            gameSession = GameSession.Instance
+                ?? throw new MissingComponentException("Quest tools require a composed GameSession.");
+            questSystem = gameSession.Quests;
+            inventory = gameSession.Inventory;
 
             agent.Tools.Register(new GetQuestStatusTool(questSystem, inventory, gameSession));
             agent.Tools.Register(new AcceptQuestTool(questSystem, gameSession));
@@ -94,22 +72,23 @@ namespace FogHarbor.Dialogue
                 var args = string.IsNullOrEmpty(argsJson) ? new JObject() : JObject.Parse(argsJson);
                 string questId = args["questId"]?.ToString();
                 if (string.IsNullOrEmpty(questId))
-                    questId = questSystem?.GetMainQuestId();
+                    questId = questSystem.GetMainQuestId();
 
-                if (string.IsNullOrEmpty(questId) || !questSystem.GetQuest(questId))
+                if (string.IsNullOrEmpty(questId) || questSystem.GetQuest(questId) == null)
                 {
                     return Task.FromResult(ToolResult.Fail($"任务不存在: {questId}"));
                 }
 
                 var quest = questSystem.GetQuest(questId);
-                bool hasTarget = inventory != null && inventory.Has(quest.TargetItemId, quest.TargetCount);
+                bool hasTarget = !string.IsNullOrEmpty(quest.TargetItemId)
+                    && inventory.Has(quest.TargetItemId, quest.TargetCount);
 
                 string result =
                     $"任务[{questId}] {quest.Title}\n" +
                     $"状态: {questSystem.GetState(questId)}\n" +
                     $"目标: {quest.TargetItemId} x{quest.TargetCount}\n" +
                     $"持有任务目标物品: {(hasTarget ? "是" : "否")}\n" +
-                    $"玩家金币: {(gameSession != null ? gameSession.GetGold() : 0)}";
+                    $"玩家金币: {gameSession.GetGold()}";
 
                 return Task.FromResult(ToolResult.Ok(result));
             }
@@ -139,13 +118,11 @@ namespace FogHarbor.Dialogue
                 if (string.IsNullOrEmpty(questId))
                     return Task.FromResult(ToolResult.Fail("缺少 questId 参数"));
 
-                if (questSystem == null || questSystem.GetQuest(questId) == null)
+                if (questSystem.GetQuest(questId) == null)
                     return Task.FromResult(ToolResult.Fail($"任务不存在: {questId}"));
 
                 // 接任务流程（校验→推进→存档）只由 GameSession 编排。
-                var result = gameSession != null
-                    ? gameSession.AcceptQuest(questId)
-                    : QuestResult.Fail("流程层未就绪，无法接受任务");
+                var result = gameSession.AcceptQuest(questId);
 
                 return Task.FromResult(result.Success
                     ? ToolResult.Ok(result.Message)
@@ -177,13 +154,11 @@ namespace FogHarbor.Dialogue
                 if (string.IsNullOrEmpty(questId))
                     return Task.FromResult(ToolResult.Fail("缺少 questId 参数"));
 
-                if (questSystem == null || questSystem.GetQuest(questId) == null)
+                if (questSystem.GetQuest(questId) == null)
                     return Task.FromResult(ToolResult.Fail($"任务不存在: {questId}"));
 
                 // 领奖完整事务（校验→扣物→发奖→置 Rewarded→存档）只由 GameSession 编排。
-                var result = gameSession != null
-                    ? gameSession.CompleteQuest(questId)
-                    : QuestResult.Fail("流程层未就绪，无法领取奖励");
+                var result = gameSession.CompleteQuest(questId);
 
                 return Task.FromResult(result.Success
                     ? ToolResult.Ok(result.Message)
@@ -196,15 +171,19 @@ namespace FogHarbor.Dialogue
         private class RecordPlayerChoiceTool : IAgentTool
         {
             private readonly GameSession gameSession;
-            private readonly NpcAgent agent;
+            private readonly string currentNpcId;
             public string Id => "record_player_choice";
             public string Description => "记录玩家对当前对话 NPC 的选择，用于好感度。只允许写入该 NPC 白名单内声明的选择 ID；省略 npcId 时默认为当前对话 NPC。";
             public string ParametersSchema => "{\"type\":\"object\",\"properties\":{\"npcId\":{\"type\":\"string\",\"description\":\"NPC ID（省略时默认当前对话 NPC）\"},\"choice\":{\"type\":\"string\",\"description\":\"白名单内的选择 ID（礼貌/尊重/关心等）\"}},\"required\":[\"choice\"]}";
 
             public RecordPlayerChoiceTool(GameSession session, NpcAgent agent)
             {
-                gameSession = session;
-                this.agent = agent;
+                gameSession = session ?? throw new ArgumentNullException(nameof(session));
+                if (agent == null) throw new ArgumentNullException(nameof(agent));
+                currentNpcId = agent.connectionProfile != null && !string.IsNullOrEmpty(agent.connectionProfile.npcId)
+                    ? agent.connectionProfile.npcId : agent.npcId;
+                if (string.IsNullOrEmpty(currentNpcId))
+                    throw new InvalidOperationException($"NpcAgent '{agent.name}' has no npcId.");
             }
 
             public Task<ToolResult> ExecuteAsync(string argsJson, object hostContext)
@@ -214,21 +193,15 @@ namespace FogHarbor.Dialogue
                 string choice = args["choice"]?.ToString();
 
                 // 锁定语义：只能向"当前对话 NPC"表达选择；显式传入其他 NPC 则拒绝。
-                string currentNpcId = agent != null
-                    ? (agent.connectionProfile != null && !string.IsNullOrEmpty(agent.connectionProfile.npcId)
-                        ? agent.connectionProfile.npcId : agent.npcId)
-                    : null;
                 if (string.IsNullOrEmpty(npcId))
                     npcId = currentNpcId;
-                else if (!string.IsNullOrEmpty(currentNpcId) && npcId != currentNpcId)
+                else if (npcId != currentNpcId)
                     return Task.FromResult(ToolResult.Fail($"只能向当前对话的 NPC（{currentNpcId}）表达选择"));
 
                 if (string.IsNullOrEmpty(npcId) || string.IsNullOrEmpty(choice))
                     return Task.FromResult(ToolResult.Fail("缺少 npcId 或 choice 参数"));
 
-                var result = gameSession != null
-                    ? gameSession.RecordPlayerChoice(npcId, choice)
-                    : QuestResult.Fail("流程层未就绪，无法记录选择");
+                var result = gameSession.RecordPlayerChoice(npcId, choice);
 
                 return Task.FromResult(result.Success
                     ? ToolResult.Ok(result.Message)

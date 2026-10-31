@@ -23,9 +23,12 @@ namespace FogHarbor.Bootstrap
             if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == TitleMenu.SceneName)
                 return;
 
-            // 当前场景已有 AppRoot（如从 Boot.scene 启动），直接使用
-            if (GameObject.Find("AppRoot") != null)
+            // Boot.scene already owns a fully composed AppRoot.
+            if (GameSession.Instance != null)
                 return;
+
+            if (GameObject.Find("AppRoot") != null)
+                throw new System.InvalidOperationException("An AppRoot object exists without a GameSession.");
 
             CreateAppRoot();
         }

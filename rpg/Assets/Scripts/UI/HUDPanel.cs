@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -43,6 +44,7 @@ namespace FogHarbor.UI
 
         public void Initialize(PlayerController player, QuestSystem qs)
         {
+            if (qs == null) throw new ArgumentNullException(nameof(qs));
             SetPlayer(player);
             SetQuestSystem(qs);
         }
@@ -51,17 +53,17 @@ namespace FogHarbor.UI
         {
             if (questSystem != null)
                 questSystem.OnQuestStateChanged -= OnQuestStateChanged;
-            questSystem = qs;
-            if (questSystem != null)
-                questSystem.OnQuestStateChanged += OnQuestStateChanged;
+            questSystem = qs ?? throw new ArgumentNullException(nameof(qs));
+            questSystem.OnQuestStateChanged += OnQuestStateChanged;
         }
 
         /// <summary>任务状态变化：进入 Completed 时给玩家即时提示（拾取/掉落推进后）。</summary>
         private void OnQuestStateChanged(string questId, QuestState state)
         {
-            if (state != QuestState.Completed || questSystem == null) return;
-            var data = questSystem.GetQuest(questId);
-            string title = data != null ? data.Title : questId;
+            if (state != QuestState.Completed) return;
+            var data = questSystem.GetQuest(questId)
+                ?? throw new InvalidOperationException($"Quest state event references unknown quest '{questId}'.");
+            string title = data.Title;
             ShowToast($"任务「{title}」目标已完成！");
         }
 

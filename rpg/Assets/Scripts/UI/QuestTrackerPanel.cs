@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -49,10 +50,7 @@ namespace FogHarbor.UI
         private static Color Hex(string hex, float alpha = 1f)
         {
             if (!ColorUtility.TryParseHtmlString(hex, out Color c))
-            {
-                Debug.LogWarning($"[QuestTrackerPanel] 颜色解析失败：{hex}");
-                return Color.magenta;
-            }
+                throw new FormatException($"QuestTrackerPanel contains an invalid color literal '{hex}'.");
             c.a = alpha;
             return c;
         }
@@ -64,13 +62,13 @@ namespace FogHarbor.UI
         {
             Unsubscribe();
 
-            questSystem = qs;
-            inventory = inv;
-            saveSystem = save;
+            questSystem = qs ?? throw new ArgumentNullException(nameof(qs));
+            inventory = inv ?? throw new ArgumentNullException(nameof(inv));
+            saveSystem = save ?? throw new ArgumentNullException(nameof(save));
 
-            if (questSystem != null) questSystem.OnQuestStateChanged += OnQuestStateChanged;
-            if (inventory != null) inventory.OnInventoryChanged += RequestRefresh;
-            if (saveSystem != null) saveSystem.OnLoadComplete += RequestRefresh;
+            questSystem.OnQuestStateChanged += OnQuestStateChanged;
+            inventory.OnInventoryChanged += RequestRefresh;
+            saveSystem.OnLoadComplete += RequestRefresh;
 
             Refresh(); // 订阅后立即刷新初值（读档可能早于本面板创建）
         }
@@ -118,8 +116,6 @@ namespace FogHarbor.UI
 
         private string BuildContent()
         {
-            if (questSystem == null) return null;
-
             CollectTrackedIds();
             if (trackedIds.Count == 0) return null;
 
@@ -129,7 +125,7 @@ namespace FogHarbor.UI
             foreach (var questId in trackedIds)
             {
                 var def = questSystem.GetQuest(questId);
-                if (def == null) continue;
+                if (def == null) throw new InvalidOperationException($"Tracked quest '{questId}' has no definition.");
 
                 var state = questSystem.GetState(questId);
                 string titleColor = state == QuestState.Completed ? RICH_DONE : RICH_TITLE;
@@ -184,19 +180,19 @@ namespace FogHarbor.UI
 
         private bool IsMain(string questId)
         {
-            var def = questSystem.GetQuest(questId);
-            return def != null && def.IsMainQuest;
+            var def = questSystem.GetQuest(questId)
+                ?? throw new InvalidOperationException($"Tracked quest '{questId}' has no definition.");
+            return def.IsMainQuest;
         }
 
         private int CurrentCount(string itemId)
         {
-            return inventory != null ? inventory.GetCount(itemId) : 0;
+            return inventory.GetCount(itemId);
         }
 
         private static string ItemName(string itemId)
         {
-            var data = ItemDatabase.GetById(itemId);
-            return data != null ? data.DisplayName : itemId;
+            return ItemDatabase.GetById(itemId).DisplayName;
         }
 
         /// <summary>按文本实际高度定浮窗尺寸（单 TMP 富文本，不用嵌套布局组，避免高度计算打架）。</summary>

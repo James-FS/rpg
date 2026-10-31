@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using AIBot.Core.Context;
 using AIBot.Unity;
@@ -27,6 +28,9 @@ namespace FogHarbor.Dialogue
             if (agent == null)
                 agent = GetComponentInChildren<NpcAgent>();
 
+            if (agent == null)
+                throw new MissingComponentException($"NPC '{name}' requires a NpcAgent.");
+
             toolHost = GetComponent<QuestToolHost>();
             if (toolHost == null)
                 toolHost = gameObject.AddComponent<QuestToolHost>();
@@ -40,11 +44,8 @@ namespace FogHarbor.Dialogue
             var gm = FindObjectOfType<FogHarbor.Debugging.GMCommandService>();
             if (gm != null && !gm.EnsureNpcTestIdentity(agent)) return;
 #endif
-            if (agent == null || !agent.isActiveAndEnabled)
-            {
-                Debug.LogWarning($"[NpcInteractable] {gameObject.name} 的 NpcAgent 不存在或未启用，无法对话");
-                return;
-            }
+            if (!agent.isActiveAndEnabled)
+                throw new InvalidOperationException($"NPC '{name}' has a disabled NpcAgent.");
 
             // 首次对话前：注册任务工具 + 绑定游戏快照（Chat 之前必须完成）
             if (!toolsRegistered)
@@ -55,14 +56,9 @@ namespace FogHarbor.Dialogue
             }
 
             // 通过 UIManager 打开对话面板并绑定 agent
-            if (UIManager.Instance != null)
-            {
-                UIManager.Instance.ShowDialogue(displayName, agent);
-            }
-            else
-            {
-                Debug.LogWarning("[NpcInteractable] UIManager 不存在，无法打开对话");
-            }
+            var ui = UIManager.Instance
+                ?? throw new MissingComponentException("NPC interaction requires UIManager.");
+            ui.ShowDialogue(displayName, agent);
         }
 
         private void EnsureGameContextProvider()

@@ -28,19 +28,10 @@ namespace FogHarbor.Player
         private const float DeadZone = 0.3f;
         private const string DeathClipName = "SwordDeath";
         private bool wasDead;
+        private float deathDuration;
 
         /// <summary>Full death clip plus a short hold before returning to Town.</summary>
-        public float DeathDuration
-        {
-            get
-            {
-                if (animator != null && animator.runtimeAnimatorController != null)
-                    foreach (var clip in animator.runtimeAnimatorController.animationClips)
-                        if (clip.name == DeathClipName)
-                            return clip.length / Mathf.Max(0.01f, animator.speed) + 0.2f;
-                return 1.5f;
-            }
-        }
+        public float DeathDuration => deathDuration;
 
         [Tooltip("速度参数平滑时间常数（秒）：滤掉逐帧测速的帧率抖动，避免动画在待机/走/跑之间闪切")]
         [SerializeField] private float speedSmoothTime = 0.1f;
@@ -54,20 +45,30 @@ namespace FogHarbor.Player
 
         private void Start()
         {
-            animator = GetComponentInChildren<Animator>();
-            player = GetComponent<PlayerController>();
-            weaponVisual = GetComponent<PlayerWeaponVisual>();
-            if (animator == null)
-                Debug.LogWarning("[PlayerAnimatorDriver] 未找到 Animator，动画参数不会更新");
-            if (player != null)
-            {
-                player.OnGatherStarted += HandleGatherStarted;
-                player.OnDrawSwordStarted += HandleDrawSwordStarted;
-                player.OnSheatheSwordStarted += HandleSheatheSwordStarted;
-                player.OnAttackStarted += HandleAttackStarted;
-                player.OnPlayerHpChanged += HandleHpChanged;
-                HandleHpChanged(player.CurrentHp, player.MaxHp);
-            }
+            animator = GetComponentInChildren<Animator>()
+                ?? throw new MissingComponentException("PlayerAnimatorDriver requires an Animator in the player hierarchy.");
+            player = GetComponent<PlayerController>()
+                ?? throw new MissingComponentException("PlayerAnimatorDriver requires PlayerController on the same object.");
+            weaponVisual = GetComponent<PlayerWeaponVisual>()
+                ?? throw new MissingComponentException("PlayerAnimatorDriver requires PlayerWeaponVisual on the same object.");
+            if (animator.runtimeAnimatorController == null)
+                throw new MissingComponentException("Player Animator has no RuntimeAnimatorController.");
+
+            foreach (var clip in animator.runtimeAnimatorController.animationClips)
+                if (clip.name == DeathClipName)
+                {
+                    deathDuration = clip.length / Mathf.Max(0.01f, animator.speed) + 0.2f;
+                    break;
+                }
+            if (deathDuration <= 0f)
+                throw new MissingReferenceException($"Player Animator Controller is missing clip '{DeathClipName}'.");
+
+            player.OnGatherStarted += HandleGatherStarted;
+            player.OnDrawSwordStarted += HandleDrawSwordStarted;
+            player.OnSheatheSwordStarted += HandleSheatheSwordStarted;
+            player.OnAttackStarted += HandleAttackStarted;
+            player.OnPlayerHpChanged += HandleHpChanged;
+            HandleHpChanged(player.CurrentHp, player.MaxHp);
         }
 
         private void OnDestroy()
@@ -95,36 +96,29 @@ namespace FogHarbor.Player
 
         private void HandleGatherStarted()
         {
-            if (animator != null)
-                animator.SetTrigger("gather");
+            animator.SetTrigger("gather");
         }
 
         private void HandleDrawSwordStarted()
         {
-            if (animator != null)
-                animator.SetTrigger("draw");
+            animator.SetTrigger("draw");
         }
 
         private void HandleSheatheSwordStarted()
         {
-            if (animator != null)
-                animator.SetTrigger("sheathe");
+            animator.SetTrigger("sheathe");
         }
 
         private void HandleAttackStarted()
         {
-            if (animator != null)
-            {
-                animator.SetBool("miningTool", weaponVisual != null && weaponVisual.IsMiningTool);
-                animator.SetBool("crouch", player != null && player.IsCrouching);
-                animator.SetBool("airborne", player != null && player.IsJumping);
-                animator.SetTrigger("attack");
-            }
+            animator.SetBool("miningTool", weaponVisual.IsMiningTool);
+            animator.SetBool("crouch", player.IsCrouching);
+            animator.SetBool("airborne", player.IsJumping);
+            animator.SetTrigger("attack");
         }
 
         private void HandleHpChanged(int hp, int maxHp)
         {
-            if (animator == null) return;
             bool dead = hp <= 0;
             animator.SetBool("dead", dead);
             if (dead == wasDead) return;
@@ -140,10 +134,9 @@ namespace FogHarbor.Player
 
         private void Update()
         {
-            if (animator == null || !hasLast)
-                return;
+            if (!hasLast) return;
 
-            if (player != null && player.IsDead)
+            if (player.IsDead)
             {
                 lastPos = transform.position;
                 animator.SetFloat("speed", 0f);
@@ -163,13 +156,10 @@ namespace FogHarbor.Player
             float target = Mathf.Clamp01(speed / MaxSpeedForAnim);
             smoothedSpeed = Mathf.Lerp(smoothedSpeed, target, 1f - Mathf.Exp(-Time.deltaTime / speedSmoothTime));
             animator.SetFloat("speed", smoothedSpeed);
-            animator.SetFloat("armed", weaponVisual != null && weaponVisual.IsDrawn && !weaponVisual.IsMiningTool ? 1f : 0f);
+            animator.SetFloat("armed", weaponVisual.IsDrawn && !weaponVisual.IsMiningTool ? 1f : 0f);
 
-            if (player != null)
-            {
-                animator.SetBool("airborne", player.IsJumping);
-                animator.SetBool("crouch", player.IsCrouching);
-            }
+            animator.SetBool("airborne", player.IsJumping);
+            animator.SetBool("crouch", player.IsCrouching);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -70,10 +71,7 @@ namespace FogHarbor.UI
         private static Color Hex(string hex, float alpha = 1f)
         {
             if (!ColorUtility.TryParseHtmlString(hex, out Color c))
-            {
-                Debug.LogWarning($"[QuestPanel] 颜色解析失败：{hex}");
-                return Color.magenta;
-            }
+                throw new FormatException($"QuestPanel contains an invalid color literal '{hex}'.");
             c.a = alpha;
             return c;
         }
@@ -108,14 +106,14 @@ namespace FogHarbor.UI
 
         // ─── 初始化 ───
 
-        public void Initialize(QuestSystem qs, InventorySystem inv = null)
+        public void Initialize(QuestSystem qs, InventorySystem inv)
         {
             Unsubscribe();
 
-            questSystem = qs;
-            inventory = inv;
+            questSystem = qs ?? throw new ArgumentNullException(nameof(qs));
+            inventory = inv ?? throw new ArgumentNullException(nameof(inv));
 
-            if (questSystem != null) questSystem.OnQuestStateChanged += OnQuestStateChanged;
+            questSystem.OnQuestStateChanged += OnQuestStateChanged;
             Refresh();
         }
 
@@ -140,7 +138,7 @@ namespace FogHarbor.UI
 
         private void Refresh()
         {
-            if (!gameObject.activeSelf || questSystem == null) return;
+            if (!gameObject.activeSelf) return;
 
             // 选中的任务没了（理论上不会）就清空选中
             if (!string.IsNullOrEmpty(selectedQuestId) && questSystem.GetQuest(selectedQuestId) == null)
@@ -197,14 +195,16 @@ namespace FogHarbor.UI
 
         private bool IsMain(string questId)
         {
-            var def = questSystem.GetQuest(questId);
-            return def != null && def.IsMainQuest;
+            return RequireQuest(questId).IsMainQuest;
         }
+
+        private QuestData RequireQuest(string questId) => questSystem.GetQuest(questId)
+            ?? throw new InvalidOperationException($"Quest panel references unknown quest '{questId}'.");
 
         private void CreateQuestRow(string questId)
         {
-            var data = questSystem.GetQuest(questId);
-            string title = data != null ? data.Title : questId;
+            var data = RequireQuest(questId);
+            string title = data.Title;
             var state = questSystem.GetState(questId);
 
             var row = CreateRowObject($"Row_{questId}");
@@ -284,12 +284,7 @@ namespace FogHarbor.UI
                 return;
             }
 
-            var data = questSystem.GetQuest(selectedQuestId);
-            if (data == null)
-            {
-                SetDetail(selectedQuestId, "", "", "", "");
-                return;
-            }
+            var data = RequireQuest(selectedQuestId);
 
             var state = questSystem.GetState(selectedQuestId);
             string kind = data.IsMainQuest ? "主线任务" : "支线任务";
@@ -317,7 +312,7 @@ namespace FogHarbor.UI
                 return $"<color={RICH_GOLD}>目标</color>  无特定目标";
 
             string itemName = ItemName(def.TargetItemId);
-            if (state == QuestState.Accepted && inventory != null)
+            if (state == QuestState.Accepted)
             {
                 int have = Mathf.Min(inventory.GetCount(def.TargetItemId), def.TargetCount);
                 string color = have >= def.TargetCount ? "#62B36B" : "#E8E2D6";
@@ -337,8 +332,7 @@ namespace FogHarbor.UI
 
         private static string ItemName(string itemId)
         {
-            var data = ItemDatabase.GetById(itemId);
-            return data != null ? data.DisplayName : itemId;
+            return ItemDatabase.GetById(itemId).DisplayName;
         }
 
         /// <summary>底部条：各状态任务数量一览。</summary>

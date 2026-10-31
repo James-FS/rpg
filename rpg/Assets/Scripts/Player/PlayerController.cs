@@ -163,15 +163,15 @@ namespace FogHarbor.Player
         public void PlayAttack()
         {
             // Swords require an explicit draw; mining tools remain ready when equipped.
-            if (weaponVisual == null || !weaponVisual.CanAttack)
+            if (!weaponVisual.CanAttack)
                 return;
 
-            float cooldown = weaponVisual != null && weaponVisual.IsMiningTool ? miningAttackCooldown : attackCooldown;
+            float cooldown = weaponVisual.IsMiningTool ? miningAttackCooldown : attackCooldown;
             if (IsBusy || Time.time < lastAttackTime + cooldown)
                 return;
 
             // The mining clip is a planted, standing strike.
-            if (weaponVisual != null && weaponVisual.IsMiningTool)
+            if (weaponVisual.IsMiningTool)
             {
                 if (isJumping) return;
                 if (isCrouching)
@@ -256,8 +256,12 @@ namespace FogHarbor.Player
 
         private void Awake()
         {
-            controller = GetComponent<CharacterController>();
-            weaponVisual = GetComponent<PlayerWeaponVisual>();
+            controller = GetComponent<CharacterController>()
+                ?? throw new MissingComponentException("PlayerController requires CharacterController on the same object.");
+            weaponVisual = GetComponent<PlayerWeaponVisual>()
+                ?? throw new MissingComponentException("PlayerController requires PlayerWeaponVisual on the same object.");
+            if (GetComponent<PlayerAnimatorDriver>() == null)
+                throw new MissingComponentException("PlayerController requires PlayerAnimatorDriver on the same object.");
             standingHeight = controller.height;
             standingCenter = controller.center;
             currentHp = maxHp;
@@ -391,10 +395,10 @@ namespace FogHarbor.Player
         private void ResolveAttackHit()
         {
             // Reject late animation callbacks after sheathing or changing equipment.
-            if (weaponVisual == null || !weaponVisual.CanAttack) return;
+            if (!weaponVisual.CanAttack) return;
             Vector3 center = transform.position + transform.forward * attackRange * 0.5f;
             Collider[] hits = Physics.OverlapSphere(center, attackRange * 0.5f);
-            if (weaponVisual != null && weaponVisual.IsMiningTool)
+            if (weaponVisual.IsMiningTool)
             {
                 FogHarbor.Items.QuestItemPickup nearestOre = null;
                 float nearestOreDistance = float.PositiveInfinity;
@@ -470,8 +474,9 @@ namespace FogHarbor.Player
         private IEnumerator DeathRoutine()
         {
             // Match the Animator's scaled time so pausing does not cut the death animation short.
-            var animationDriver = GetComponent<PlayerAnimatorDriver>();
-            float delay = animationDriver != null ? animationDriver.DeathDuration : 1.5f;
+            var animationDriver = GetComponent<PlayerAnimatorDriver>()
+                ?? throw new MissingComponentException("PlayerController requires PlayerAnimatorDriver for the death sequence.");
+            float delay = animationDriver.DeathDuration;
             yield return new WaitForSeconds(delay);
             deathRoutine = null;
             if (IsDead)
@@ -486,8 +491,9 @@ namespace FogHarbor.Player
         {
             if (!IsDead || !CanRevive) return false;
             CanRevive = false;
-            var session = FindObjectOfType<FogHarbor.Session.GameSession>();
-            if (session != null && session.ChangeScene("Town", true)) return true;
+            var session = FogHarbor.Session.GameSession.Instance
+                ?? throw new MissingComponentException("Reviving requires a composed GameSession.");
+            if (session.ChangeScene("Town", true)) return true;
             CanRevive = true;
             return false;
         }

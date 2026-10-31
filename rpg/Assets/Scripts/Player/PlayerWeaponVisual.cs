@@ -48,7 +48,6 @@ namespace FogHarbor.Player
         private Animator animator;
         private GameObject weaponInstance;
         private string currentItemId = "";
-        private float bindDeadline;
         private Coroutine guideRoutine;
         private bool guiding;
 
@@ -71,22 +70,16 @@ namespace FogHarbor.Player
         public bool CanAttack => !string.IsNullOrEmpty(currentItemId) && !guiding
             && (drawn || IsMiningTool);
         public bool IsMiningTool => !string.IsNullOrEmpty(currentItemId)
-            && ItemDatabase.GetById(currentItemId)?.IsMiningTool == true;
+            && ItemDatabase.GetById(currentItemId).IsMiningTool;
 
         private void OnEnable()
         {
-            // AppRoot 由 GameBootstrapper 在 AfterSceneLoad 创建，晚于场景物体的 OnEnable，
-            // 因此这里拿不到就开一个短重试窗口，避免"装备了但身上没有刀"这种静默失败。
-            bindDeadline = Time.time + 2f;
             drawn = drawnShared;
             animator = GetComponentInChildren<Animator>();
             player = GetComponent<PlayerController>();
-            if (player != null)
-            {
-                player.OnAttackStarted += EnsureWeaponInHand;
-                player.OnPlayerHpChanged += HandleHpChanged;
-            }
-            TryBind();
+            if (player == null) throw new MissingComponentException("PlayerWeaponVisual requires PlayerController on the same object.");
+            player.OnAttackStarted += EnsureWeaponInHand;
+            player.OnPlayerHpChanged += HandleHpChanged;
         }
 
         private void OnDisable()
@@ -139,9 +132,6 @@ namespace FogHarbor.Player
 
         private void Update()
         {
-            if (equipment == null && Time.time < bindDeadline)
-                TryBind();
-
             // 拔刀 / 收刀：面板打开时不响应（否则在对话框里打字会把 r 当成拔刀键）
             if (!GameInput.Blocked && Input.GetKeyDown(drawKey))
                 ToggleDraw();
@@ -175,9 +165,9 @@ namespace FogHarbor.Player
         /// 未装备武器、动作中（采集/攻击/拔收刀）或腾空时不响应。</summary>
         public void ToggleDraw()
         {
-            if (guiding || equipment == null || !equipment.HasWeapon || IsMiningTool)
+            if (guiding || !equipment.HasWeapon || IsMiningTool)
                 return;
-            if (player != null && (player.IsBusy || player.IsJumping || player.IsCrouching))
+            if (player.IsBusy || player.IsJumping || player.IsCrouching)
                 return;
 
             if (!drawn) guideRoutine = StartCoroutine(DrawRoutine());
@@ -189,7 +179,7 @@ namespace FogHarbor.Player
         {
             drawn = true;
             drawnShared = true;
-            if (player != null) player.PlayDrawSword();
+            player.PlayDrawSword();
             yield return GuideWeapon("DrawSword", drawSwapProgress, drawSwapProgress + swapBlendProgress,
                 ResolveStowSocket(), ResolveSocket());
             Debug.Log($"[WeaponVisual] 拔刀：{currentItemId}");
@@ -200,7 +190,7 @@ namespace FogHarbor.Player
         {
             drawn = false;
             drawnShared = false;
-            if (player != null) player.PlaySheatheSword();
+            player.PlaySheatheSword();
             yield return GuideWeapon("SheatheSword", sheatheSwapProgress - swapBlendProgress, sheatheSwapProgress,
                 ResolveSocket(), ResolveStowSocket());
             Debug.Log($"[WeaponVisual] 收刀：{currentItemId}");
@@ -260,14 +250,12 @@ namespace FogHarbor.Player
 
         // ─── 绑定 ───
 
-        private void TryBind()
+        public void BindEquipment(EquipmentSystem system)
         {
-            if (equipment != null)
-                return;
-
-            equipment = FindObjectOfType<EquipmentSystem>();
-            if (equipment == null)
-                return;
+            if (system == null) throw new System.ArgumentNullException(nameof(system));
+            if (equipment == system) return;
+            UnbindEquipment();
+            equipment = system;
 
             equipment.OnEquipmentChanged += OnEquipmentChanged;
             RefreshVisual();
@@ -283,17 +271,17 @@ namespace FogHarbor.Player
         private void OnEquipmentChanged()
         {
             // 换了武器（或卸下）后重置为收刀状态，重新从腰间开始
-            string newId = equipment != null ? equipment.WeaponId : "";
+            string newId = equipment.WeaponId;
             if (newId != currentItemId)
             {
                 if (guideRoutine != null) StopCoroutine(guideRoutine);
                 guideRoutine = null;
                 guiding = false;
-                player?.OnAttackAnimationExit();
+                player.OnAttackAnimationExit();
                 if (animator != null)
                 {
                     foreach (string trigger in new[] { "attack", "draw", "sheathe" }) animator.ResetTrigger(trigger);
-                    if (player == null || !player.IsDead) animator.CrossFadeInFixedTime("Base Layer.Move", 0.08f, 0);
+                    if (!player.IsDead) animator.CrossFadeInFixedTime("Base Layer.Move", 0.08f, 0);
                 }
                 drawn = false;
                 drawnShared = false;
@@ -306,7 +294,7 @@ namespace FogHarbor.Player
         /// <summary>按当前装备与拔刀状态刷新外观：收刀挂腰间、拔刀挂手上。</summary>
         private void RefreshVisual()
         {
-            currentItemId = equipment != null ? equipment.WeaponId : "";
+            currentItemId = equipment.WeaponId;
             if (string.IsNullOrEmpty(currentItemId))
             {
                 ClearWeapon();
@@ -316,7 +304,9 @@ namespace FogHarbor.Player
 
             if (IsMiningTool) drawn = drawnShared = true;
             if (animator != null) animator.SetBool("miningTool", IsMiningTool);
-            ShowWeapon(currentItemId, drawn ? ResolveSocket() : ResolveStowSocket());
+            var item = ItemDatabase.GetById(currentItemId);
+            Transform socket = item.HoldPrefab == null ? null : drawn ? ResolveSocket() : ResolveStowSocket();
+            ShowWeapon(currentItemId, socket);
             CleanupOrphanWeapons();
         }
 
@@ -326,18 +316,15 @@ namespace FogHarbor.Player
             ClearWeapon();
             CleanupOrphanWeapons();
 
-            if (string.IsNullOrEmpty(itemId) || socket == null)
-                return;
+            if (string.IsNullOrEmpty(itemId)) return;
 
             var data = ItemDatabase.GetById(itemId);
-            if (data == null)
-                return;
-
             if (data.HoldPrefab == null)
             {
                 Debug.Log($"[WeaponVisual] {data.DisplayName} 未配置手持模型，只生效属性不显示外观");
                 return;
             }
+            if (socket == null) throw new MissingReferenceException($"Weapon '{itemId}' has no valid visual socket.");
 
             weaponInstance = Instantiate(data.HoldPrefab, socket, false);
             weaponInstance.name = "Weapon_" + itemId;
@@ -347,8 +334,8 @@ namespace FogHarbor.Player
         private void ApplyWeaponPose(Transform weapon)
         {
             var data = ItemDatabase.GetById(currentItemId);
-            weapon.localPosition = data != null ? data.HoldLocalPosition : Vector3.zero;
-            weapon.localRotation = data != null ? Quaternion.Euler(data.HoldLocalEulerAngles) : Quaternion.identity;
+            weapon.localPosition = data.HoldLocalPosition;
+            weapon.localRotation = Quaternion.Euler(data.HoldLocalEulerAngles);
             weapon.localScale = Vector3.one;
         }
 
@@ -375,8 +362,7 @@ namespace FogHarbor.Player
                 }
             }
 
-            Debug.LogWarning($"[WeaponVisual] 未找到武器挂点 '{socketName}'，武器外观不会显示");
-            return null;
+            throw new MissingReferenceException($"Player prefab is missing weapon socket '{socketName}'.");
         }
 
         /// <summary>左腰挂点（收刀时的默认位置）：优先用 Inspector 绑定，其次按名字查找。</summary>
@@ -394,8 +380,7 @@ namespace FogHarbor.Player
                 }
             }
 
-            Debug.LogWarning($"[WeaponVisual] 未找到腰间挂点 '{stowSocketName}'，武器外观不会显示");
-            return null;
+            throw new MissingReferenceException($"Player prefab is missing stow socket '{stowSocketName}'.");
         }
     }
 }

@@ -1,5 +1,7 @@
+using System.IO;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using FogHarbor.UI;
 
 namespace FogHarbor.Bootstrap
 {
@@ -27,6 +29,18 @@ namespace FogHarbor.Bootstrap
             DontDestroyOnLoad(gameObject);
         }
 
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+        }
+
+        public static void ReturnToTitleWithMessage(string message)
+        {
+            TitleMenu.SetStartupMessage(message);
+            if (Instance != null) Destroy(Instance.gameObject);
+            SceneManager.LoadScene(TitleMenu.SceneName);
+        }
+
         private void Start()
         {
             // Boot 场景启动后自动加载第一个游戏场景
@@ -34,8 +48,16 @@ namespace FogHarbor.Bootstrap
             {
                 // 直接从 Boot 进 Play 时没有标题幕层，补一层遮住同步加载的黑屏
                 if (FogHarbor.UI.LoadingVeil.Active == null) FogHarbor.UI.LoadingVeil.Show(null);
-                var saves = GetComponent<FogHarbor.Save.SaveSystem>();
-                SceneManager.LoadScene(saves != null ? saves.GetResumeScene(firstSceneName) : firstSceneName);
+                var saves = GetComponent<FogHarbor.Save.SaveSystem>()
+                    ?? throw new MissingComponentException("Boot AppRoot requires SaveSystem.");
+                try
+                {
+                    SceneManager.LoadScene(saves.GetResumeScene(firstSceneName));
+                }
+                catch (InvalidDataException ex)
+                {
+                    ReturnToTitleWithMessage(ex.Message);
+                }
             }
         }
     }

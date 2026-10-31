@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using FogHarbor.Items;
 using FogHarbor.Player;
@@ -32,14 +33,24 @@ namespace FogHarbor.Items
 
         private void Awake()
         {
-            gameSession = FindObjectOfType<GameSession>();
-            player = FindObjectOfType<PlayerController>();
+            if (string.IsNullOrWhiteSpace(itemId))
+                throw new System.InvalidOperationException($"Pickup '{name}' requires itemId.");
+            ItemDatabase.GetById(itemId);
+            if (count <= 0) throw new System.InvalidOperationException($"Pickup '{name}' count must be positive.");
+        }
+
+        private void Start()
+        {
+            gameSession = GameSession.Instance
+                ?? throw new MissingComponentException("QuestItemPickup requires a composed GameSession.");
+            player = gameSession.Player
+                ?? throw new MissingComponentException("QuestItemPickup requires a bound PlayerController.");
         }
 
         public string GetPrompt()
         {
             var data = ItemDatabase.GetById(itemId);
-            string name = data != null ? data.DisplayName : itemId;
+            string name = data.DisplayName;
             if (requiredMiningHits > 0)
                 return $"左键 / E 挖掘 {name}（{miningHits}/{requiredMiningHits}，需装备镐子）";
             return string.IsNullOrEmpty(name) ? promptText : $"{promptText} {name}";
@@ -50,11 +61,11 @@ namespace FogHarbor.Items
             if (collected) return;
             if (requiredMiningHits > 0)
             {
-                if (player == null) player = FindObjectOfType<PlayerController>();
-                var weapon = player != null ? player.GetComponent<PlayerWeaponVisual>() : null;
-                if (weapon == null || !weapon.IsMiningTool)
+                var weapon = player.GetComponent<PlayerWeaponVisual>()
+                    ?? throw new MissingComponentException("Mining requires PlayerWeaponVisual on the player.");
+                if (!weapon.IsMiningTool)
                 {
-                    if (UIManager.Instance != null) UIManager.Instance.ShowToast("请先装备镐子");
+                    UIManager.Instance.ShowToast("请先装备镐子");
                     return;
                 }
                 if (player.IsBusy || player.IsJumping) return;
@@ -89,9 +100,11 @@ namespace FogHarbor.Items
         public bool CanMine(PlayerController miner, out float surfaceSqrDistance)
         {
             surfaceSqrDistance = float.PositiveInfinity;
-            if (!IsMineable || miner == null || miner.IsDead) return false;
-            var weapon = miner.GetComponent<PlayerWeaponVisual>();
-            if (weapon == null || !weapon.IsMiningTool) return false;
+            if (miner == null) throw new System.ArgumentNullException(nameof(miner));
+            if (!IsMineable || miner.IsDead) return false;
+            var weapon = miner.GetComponent<PlayerWeaponVisual>()
+                ?? throw new MissingComponentException("Mining requires PlayerWeaponVisual on the player.");
+            if (!weapon.IsMiningTool) return false;
             Vector3 direction = transform.position - miner.transform.position;
             direction.y = 0f;
             if (Vector3.Dot(miner.transform.forward, direction) <= 0f) return false;
@@ -108,40 +121,21 @@ namespace FogHarbor.Items
 
         private bool CompletePickup(bool playGather)
         {
-            if (string.IsNullOrEmpty(itemId))
-            {
-                Debug.LogWarning($"[QuestItemPickup] {gameObject.name} 未配置 itemId");
-                return false;
-            }
-
-            // 场景刚加载时 Awake 早于 AppRoot 创建，延迟解析。
-            if (gameSession == null)
-                gameSession = FindObjectOfType<GameSession>();
-
-            if (gameSession == null)
-            {
-                Debug.LogError("[QuestItemPickup] 未找到 GameSession，无法拾取");
-                return false;
-            }
+            if (gameSession == null) throw new InvalidOperationException("QuestItemPickup.Start did not bind GameSession.");
 
             var result = gameSession.PickupItem(itemId, count);
             if (!result.Success)
             {
-                Debug.LogWarning($"[QuestItemPickup] 拾取失败: {result.Message}");
+                UIManager.Instance.ShowToast(result.Message);
+                Debug.LogError($"[QuestItemPickup] 拾取失败: {result.Message}");
                 return false;
             }
 
             var data = ItemDatabase.GetById(itemId);
-            string name = data != null ? data.DisplayName : itemId;
-            if (UIManager.Instance != null)
-                UIManager.Instance.ShowToast($"获得 {name} x{count}");
-            else
-                Debug.Log($"[QuestItemPickup] 获得 {name} x{count}");
+            UIManager.Instance.ShowToast($"获得 {data.DisplayName} x{count}");
 
             // 表现层：转身面向拾取物并播放采集动作（短暂定身）
-            if (player == null)
-                player = FindObjectOfType<PlayerController>();
-            if (playGather && player != null)
+            if (playGather)
                 player.PlayGather(transform.position);
 
             collected = true;
